@@ -1,12 +1,23 @@
 #!/bin/bash
-# Reproducible mainline-7.1 kernel build for ClockworkPi uConsole (Radxa CM5)
+# Reproducible mainline kernel build for ClockworkPi uConsole (Radxa CM5)
+#
 # Regenerates .config from defconfig + fragment, builds Image/modules/dtbs.
+# Works natively on the uConsole and cross-compiled from an x86_64 host.
 # Safe to run after make distclean.
+#
+# Usage:
+#   ./build-uconsole-kernel.sh              # build $KVER from default paths
+#   KVER=7.2 ./build-uconsole-kernel.sh     # build a different version
+#   FORCE_DEFCONFIG=1 ./build-uconsole-kernel.sh    # discard existing .config
 set -euo pipefail
 
-KDIR="${KDIR:-$HOME/uconsole/sources/linux-7.1}"
-STAGING="${STAGING:-$HOME/uconsole/staging/modules-7.1}"
-FRAGMENT="$HOME/uconsole/configs/uconsole-7.1.config"
+# Single knob for version bumps — everything else derives from it.
+KVER="${KVER:-7.2}"
+BASE="${BASE:-$HOME/Work}"
+
+KDIR="${KDIR:-$BASE/linux-$KVER}"
+STAGING="${STAGING:-$BASE/staging/modules-$KVER}"
+FRAGMENT="${FRAGMENT:-$BASE/configs/uconsole-$KVER.config}"
 
 export ARCH=arm64
 # Cross-compile only when building on a non-aarch64 host (e.g. x86_64 PC).
@@ -19,6 +30,7 @@ mkdir -p "$(dirname "$FRAGMENT")"
 
 # ---------------------------------------------------------------
 # Config fragment — consolidated from the full bring-up history.
+# This file, not .config, is the source of truth.
 # ---------------------------------------------------------------
 cat > "$FRAGMENT" << 'EOF'
 # ---- Display chain (all =y: no initramfs, fbcon at boot) ----
@@ -32,7 +44,7 @@ CONFIG_DRM_FBDEV_EMULATION=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 # fbcon rotation: required for panel orientation to work at console
 CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
-# ---- HDMI (debug/secondary output) ----
+# ---- HDMI (secondary output) ----
 CONFIG_ROCKCHIP_DW_HDMI_QP=y
 CONFIG_PHY_ROCKCHIP_SAMSUNG_HDPTX=y
 # ---- Storage (rootfs-critical, must be built-in) ----
@@ -79,7 +91,7 @@ CONFIG_PCIE_ROCKCHIP_DW=y
 CONFIG_PCIE_ROCKCHIP_DW_HOST=y
 CONFIG_PHY_ROCKCHIP_NANENG_COMBO_PHY=y
 CONFIG_BLK_DEV_NVME=y
-# ---- WiFi: RealTek RTW88 USB dongles ----
+# ---- WiFi: RealTek RTW88 USB dongles (trim to your hardware) ----
 CONFIG_WLAN=y
 CONFIG_WLAN_VENDOR_REALTEK=y
 CONFIG_RTW88=m
@@ -94,7 +106,9 @@ EOF
 
 cd "$KDIR"
 
-echo "== Sanity: our source additions survived? =="
+echo "== Building kernel $KVER in $KDIR =="
+
+echo "== Sanity: our source additions present? =="
 test -f drivers/gpu/drm/panel/panel-cwu50.c || { echo "MISSING panel-cwu50.c"; exit 1; }
 test -f arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dts || { echo "MISSING uconsole DTS"; exit 1; }
 grep -q CWU50 drivers/gpu/drm/panel/Kconfig   || { echo "MISSING Kconfig entry"; exit 1; }
@@ -102,14 +116,29 @@ grep -q cwu50 drivers/gpu/drm/panel/Makefile  || { echo "MISSING Makefile entry"
 grep -q uconsole arch/arm64/boot/dts/rockchip/Makefile || { echo "MISSING dtb Makefile entry"; exit 1; }
 echo "   all present."
 
-echo "== Config: defconfig + fragment =="
-test -f .config || make defconfig
+echo "== Config =="
+if [ -n "${FORCE_DEFCONFIG:-}" ]; then
+	echo "   FORCE_DEFCONFIG set — regenerating from defconfig."
+	make defconfig
+elif [ -f .config ]; then
+	echo "   NOTE: reusing the existing .config as the merge base."
+	echo "         Any manual tweaks in it are preserved, but the build is"
+	echo "         then NOT reproducible from scratch. Run with"
+	echo "         FORCE_DEFCONFIG=1 to start clean from defconfig."
+	# After a version bump an inherited .config needs resolving first.
+	make olddefconfig
+else
+	make defconfig
+fi
+
 ./scripts/kconfig/merge_config.sh .config "$FRAGMENT"
 
 echo "== Verify critical symbols =="
+# Each of these has failed silently at least once during bring-up.
 for sym in DRM_PANEL_CLOCKWORKPI_CWU50 ROCKCHIP_DW_MIPI_DSI2 \
            PHY_ROCKCHIP_SAMSUNG_DCPHY FRAMEBUFFER_CONSOLE_ROTATION \
-           BATTERY_AXP20X DWMAC_ROCKCHIP; do
+           BATTERY_AXP20X INPUT_AXP20X_PEK DWMAC_ROCKCHIP \
+           PCIE_ROCKCHIP_DW_HOST PHY_ROCKCHIP_NANENG_COMBO_PHY; do
 	grep -q "^CONFIG_${sym}=y" .config || { echo "FAILED: $sym not =y"; exit 1; }
 done
 grep -q "^CONFIG_NETCONSOLE=m" .config || { echo "FAILED: NETCONSOLE not =m"; exit 1; }
@@ -123,17 +152,31 @@ rm -rf "$STAGING"
 make INSTALL_MOD_PATH="$STAGING" modules_install
 
 KREL=$(cat include/config/kernel.release)
-echo ""
-echo "== DONE. Kernel: $KREL =="
-echo "Deploy:"
-echo "  scp arch/arm64/boot/Image \$DEV:/tmp/Image-7.1"
-echo "  scp arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dtb \$DEV:/tmp/"
-echo "  scp drivers/net/netconsole.ko \$DEV:/tmp/"
-echo "  rsync -a $STAGING/lib/modules/$KREL \$DEV:/tmp/mods/"
-echo "Or:"
-echo "  sudo mv /boot/Image-7.1 /boot/Image-7.1-old"
-echo "  sudo cp arch/arm64/boot/Image /boot/Image-7.1"
-echo "  sudo mv /boot/dtb-7.1/* /boot/dtb-7.1-old/"
-echo "  sudo cp arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dtb /boot/dtb-7.1/"
-echo "  # sudo cp drivers/net/netconsole.ko \$DEV:/tmp/"
-echo "  sudo rsync -a --no-o --no-g $STAGING/lib/modules/$KREL /lib/modules/"
+DTB="arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dtb"
+
+cat << DEPLOY
+
+== DONE. Kernel: $KREL ==
+
+Deploy ALL THREE artifacts together — a stale DTB fails silently.
+
+--- Native (building on the uConsole) ---
+  sudo mv /boot/Image-$KVER /boot/Image-$KVER-old
+  sudo cp arch/arm64/boot/Image /boot/Image-$KVER
+  sudo mkdir -p /boot/dtb-$KVER-old
+  sudo mv /boot/dtb-$KVER/* /boot/dtb-$KVER-old/ 2>/dev/null || true
+  sudo cp $DTB /boot/dtb-$KVER/
+  sudo rsync -a --no-o --no-g $STAGING/lib/modules/$KREL /lib/modules/
+
+--- Cross (building on a PC, \$DEV=user@uconsole) ---
+  scp arch/arm64/boot/Image \$DEV:/tmp/Image-$KVER
+  scp $DTB \$DEV:/tmp/
+  scp drivers/net/netconsole.ko \$DEV:/tmp/
+  rsync -a $STAGING/lib/modules/$KREL \$DEV:/tmp/mods/
+
+--- After rebooting, verify you are running what you just built ---
+  uname -r                                                         # $KREL
+  tr -d '\\0' < /sys/firmware/devicetree/base/pcie@fe190000/status  # okay
+  sudo dmesg | grep "panel:"                                       # TXW500170B0-BL
+
+DEPLOY
