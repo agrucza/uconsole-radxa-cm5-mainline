@@ -1,0 +1,456 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ClockworkPi uConsole with Radxa CM5 (RK3588S) — mainline Linux 7.1+
+ *
+ * Carrier definition for the uConsole mainboard (CM4-compatible socket)
+ * hosting the Radxa CM5 module. Based on rk3588s-radxa-cm5-io.dts
+ * (carrier reference) with uConsole-specific hardware:
+ *
+ *  - CWU50 MIPI-DSI panel (JD9365DA-H3): TXW500170B0 + TXW500170B0-BL
+ *    on DSI1 via mipidcphy1, output through VOP2 VP2
+ *  - AXP228 PMU on bit-banged I2C (CM4 ID_SD/ID_SC pins)
+ *  - GPIO backlight (OCP8178 controlled as simple on/off for now)
+ *  - UART4 (m2 pinmux) debug console on GPIO connector pins
+ *  - HDMI kept enabled as debug/secondary output
+ *
+ * CM4 connector GPIO mapping (BCM → RK3588S):
+ *   BCM0  PIN_27  GPIO1_D7  AXP228 I2C SDA
+ *   BCM1  PIN_28  GPIO1_D6  AXP228 I2C SCL
+ *   BCM2  PIN_3   GPIO0_D0  AXP228 IRQ (active-low)
+ *   BCM8  PIN_24  GPIO1_B4  Panel RESX (revision detect: BL pulls LOW)
+ *   BCM9  PIN_21  GPIO1_B1  Backlight enable (active-high)
+ *   BCM10 PIN_19  GPIO1_B2  UART4 RX (m2)
+ *   BCM11 PIN_23  GPIO1_B3  UART4 TX (m2)
+ *
+ * Debug serial: UART4 @ 1,500,000 baud (CP2102N/FT232H/CH343P required)
+ *   host RX → PIN_23, host TX → PIN_19, GND → PIN_25
+ */
+
+/dts-v1/;
+
+#include "rk3588s.dtsi"
+#include "rk3588s-radxa-cm5.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/soc/rockchip,vop2.h>
+
+/ {
+	model = "ClockworkPi uConsole (Radxa CM5)";
+	compatible = "clockworkpi,uconsole-cm5", "radxa,cm5",
+		     "rockchip,rk3588s";
+
+	aliases {
+		ethernet0 = &gmac1;
+		mmc1 = &sdmmc;
+	};
+
+	chosen {
+		stdout-path = "serial4:1500000n8";
+	};
+
+	/* HDMI debug/secondary output (works on uConsole via hw mod or
+	 * HackerGadgets adapter breakout) */
+	hdmi-con {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi0_out_con>;
+			};
+		};
+	};
+
+	/* Carrier power rails */
+	vcc5v0_sys: regulator-5v0-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+
+	vcc_3v3_s0: regulator-3v3-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_s0";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
+	/* PCIe 3.3V for the HackerGadgets NVMe board. On the Radxa CM5-IO
+	 * reference this rail is gated via GPIO1_D3 (a CM4-socket signal);
+	 * mirrored here. If the HackerGadgets board powers the M.2 slot
+	 * directly, the enable line is unconnected — harmless either way. */
+	vcc3v3_pcie: regulator-3v3-pcie {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_pcie";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		gpios = <&gpio1 RK_PD3 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <50000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	/* AXP228 PMU on uConsole mainboard — bit-banged I2C on
+	 * CM4 ID_SD/ID_SC (GPIO1_D7 = SDA, GPIO1_D6 = SCL) */
+	i2c-axp {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpio1 RK_PD7 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpio1 RK_PD6 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&uc_i2c_axp_pins>;
+
+		axp228: pmic@34 {
+			compatible = "x-powers,axp228", "x-powers,axp223",
+				     "x-powers,axp221";
+			reg = <0x34>;
+			interrupt-parent = <&gpio0>;
+			interrupts = <RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+			interrupt-controller;
+			#interrupt-cells = <1>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&uc_axp_irq_pin>;
+
+			regulators {
+				x-powers,dcdc-freq = <3000>;
+
+				reg_axp_dcdc1: dcdc1 {
+					regulator-name = "axp-sys-3v3";
+					regulator-always-on;
+					regulator-boot-on;
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				/* Panel vci (1.8V digital I/O) */
+				reg_axp_dcdc3: dcdc3 {
+					regulator-name = "axp-sys-1v8";
+					regulator-always-on;
+					regulator-boot-on;
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+				};
+
+				reg_axp_aldo1: aldo1 {
+					regulator-name = "axp-audio-3v3";
+					regulator-always-on;
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				/* Panel iovcc (3.3V display VCC) */
+				reg_axp_aldo2: aldo2 {
+					regulator-name = "axp-disp-3v3";
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				reg_axp_dldo2: dldo2 {
+					regulator-name = "axp-ext-3v3-a";
+					regulator-always-on;
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				reg_axp_dldo3: dldo3 {
+					regulator-name = "axp-ext-3v3-b";
+					regulator-always-on;
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+
+				reg_axp_dldo4: dldo4 {
+					regulator-name = "axp-ext-3v3-c";
+					regulator-always-on;
+					regulator-min-microvolt = <3300000>;
+					regulator-max-microvolt = <3300000>;
+				};
+			};
+
+			battery_power_supply: battery-power-supply {
+				compatible = "x-powers,axp221-battery-power-supply";
+				monitored-battery = <&battery>;
+			};
+
+			ac_power_supply: ac-power-supply {
+				compatible = "x-powers,axp221-ac-power-supply";
+			};
+
+			axp_adc: adc {
+				compatible = "x-powers,axp221-adc";
+				#io-channel-cells = <1>;
+			};
+		};
+	};
+
+	/* 2× 18650, 3350 mAh each, parallel */
+	battery: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion";
+		constant-charge-current-max-microamp = <2100000>;
+		voltage-max-design-microvolt = <4200000>;
+		re-charge-voltage-microvolt = <4000000>;
+		voltage-min-design-microvolt = <2900000>;
+		energy-full-design-microwatt-hours = <24790000>;
+		charge-full-design-microamp-hours = <6700000>;
+	};
+
+	/* Backlight: simple GPIO on/off for bringup.
+	 * TODO: port ocp8178 driver for 8-step brightness. */
+	backlight: backlight {
+		compatible = "gpio-backlight";
+		gpios = <&gpio1 RK_PB1 GPIO_ACTIVE_HIGH>;
+		default-on;
+		pinctrl-names = "default";
+		pinctrl-0 = <&uc_backlight_pin>;
+	};
+};
+
+/* ---------------- Display: CWU50 panel on DSI1 → VP2 ---------------- */
+
+&dsi1 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	panel@0 {
+		compatible = "cw,cwu50";
+		reg = <0>;
+
+		/* Read as INPUT at probe for revision detect:
+		 * LOW = TXW500170B0-BL (new), HIGH = original.
+		 * Confirmed via RDID1 (0x39 = new) in prepare(). */
+		reset-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_LOW>;
+
+		backlight = <&backlight>;
+		rotation = <90>;
+
+		vci-supply = <&reg_axp_dcdc3>;
+		iovcc-supply = <&reg_axp_aldo2>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&uc_panel_reset_pin>;
+
+		port {
+			panel_in_dsi1: endpoint {
+				remote-endpoint = <&dsi1_out_panel>;
+			};
+		};
+	};
+};
+
+&dsi1_in {
+	dsi1_in_vp3: endpoint {
+		remote-endpoint = <&vp3_out_dsi1>;
+	};
+};
+
+&dsi1_out {
+	dsi1_out_panel: endpoint {
+		remote-endpoint = <&panel_in_dsi1>;
+	};
+};
+
+&mipidcphy1 {
+	status = "okay";
+};
+
+/* VP3 drives the panel — mirrors mainline rk3588s-gameforce-ace.dts,
+ * which runs a larger 1080x1920 DSI panel through VP3. */
+&vp3 {
+	vp3_out_dsi1: endpoint@ROCKCHIP_VOP2_EP_MIPI1 {
+		reg = <ROCKCHIP_VOP2_EP_MIPI1>;
+		remote-endpoint = <&dsi1_in_vp3>;
+	};
+};
+
+/* ---------------- HDMI debug output on VP0 ---------------- */
+
+&hdmi0 {
+	status = "okay";
+};
+
+&hdmi0_in {
+	hdmi0_in_vp0: endpoint {
+		remote-endpoint = <&vp0_out_hdmi0>;
+	};
+};
+
+&hdmi0_out {
+	hdmi0_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+&hdmi0_sound {
+	status = "okay";
+};
+
+&hdptxphy0 {
+	status = "okay";
+};
+
+&i2s5_8ch {
+	status = "okay";
+};
+
+&vp0 {
+	vp0_out_hdmi0: endpoint@ROCKCHIP_VOP2_EP_HDMI0 {
+		reg = <ROCKCHIP_VOP2_EP_HDMI0>;
+		remote-endpoint = <&hdmi0_in_vp0>;
+	};
+};
+
+/* ---------------- Core peripherals ---------------- */
+
+&vop {
+	status = "okay";
+};
+
+&vop_mmu {
+	status = "okay";
+};
+
+&gmac1 {
+	status = "okay";
+};
+
+&sdmmc {
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	disable-wp;
+	no-sdio;
+	sd-uhs-sdr104;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_bus4 &sdmmc_clk &sdmmc_cmd &sdmmc_det>;
+	vmmc-supply = <&vcc_3v3_s3>;
+	vqmmc-supply = <&vccio_sd_s0>;
+	status = "okay";
+};
+
+/* UART4 m2: RX=GPIO1_B2 (PIN_19), TX=GPIO1_B3 (PIN_23) */
+&uart4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4m2_xfer>;
+	status = "okay";
+};
+
+/* USB */
+&u2phy0 {
+	status = "okay";
+};
+
+&u2phy0_otg {
+	status = "okay";
+};
+
+&u2phy2 {
+	status = "okay";
+};
+
+&u2phy2_host {
+	status = "okay";
+};
+
+&u2phy3 {
+	status = "okay";
+};
+
+&u2phy3_host {
+	status = "okay";
+};
+
+/* PHYs required by the two dwc3 controllers — without these,
+ * fc000000.usb and fcd00000.usb defer probe forever
+ * ("dwc3: failed to initialize core"). */
+&combphy0_ps {
+	status = "okay";
+};
+
+&combphy2_psu {
+	status = "okay";
+};
+
+&usbdp_phy0 {
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
+};
+
+&usb_host0_xhci {
+	/* Host, not OTG: no Type-C role-switch hardware on the uConsole,
+	 * and the internal keyboard hub hangs off this port.
+	 * Gadget/CDC-ACM experiments can revisit this later. */
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usb_host1_ehci {
+	status = "okay";
+};
+
+&usb_host1_ohci {
+	status = "okay";
+};
+
+&usb_host2_xhci {
+	status = "okay";
+};
+
+/* PCIe x1 on the CM4-socket lane → HackerGadgets NVMe board.
+ * PERST# routing (GPIO3_D1) is module-side, same as the CM5-IO board,
+ * so it applies regardless of carrier. combphy0_ps (the PCIe PHY) is
+ * already enabled above. */
+&pcie2x1l2 {
+	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc3v3_pcie>;
+	status = "okay";
+};
+
+/* PCIe SMMU: unused on the uConsole (no PCIe) and its shutdown handler
+ * hangs reboot/poweroff — RK3588 MMU600 wired-IRQ erratum territory.
+ * Disabling it lets device_shutdown() complete cleanly. */
+&mmu600_pcie {
+	status = "disabled";
+};
+
+/* ---------------- Pinctrl ---------------- */
+
+&pinctrl {
+	uconsole {
+		uc_i2c_axp_pins: uc-i2c-axp-pins {
+			rockchip,pins =
+				<1 RK_PD7 RK_FUNC_GPIO &pcfg_pull_none>,
+				<1 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		uc_axp_irq_pin: uc-axp-irq-pin {
+			rockchip,pins = <0 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		uc_panel_reset_pin: uc-panel-reset-pin {
+			rockchip,pins = <1 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		uc_backlight_pin: uc-backlight-pin {
+			rockchip,pins = <1 RK_PB1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
