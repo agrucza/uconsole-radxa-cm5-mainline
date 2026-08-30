@@ -1,10 +1,12 @@
-# uConsole + Radxa CM5 on mainline Linux 7.1
+# uConsole + Radxa CM5 on mainline Linux 7.1 / 7.2
 
 Mainline kernel support for the [ClockworkPi uConsole](https://www.clockworkpi.com/uconsole) running a **Radxa CM5** (Rockchip RK3588S) module — including the **new December-2025 LCD revision (TXW500170B0-BL)** that the older community drivers render as garbage.
 
-No BSP tree, no vendor kernel. Just mainline `v7.1` plus one panel driver and one device tree.
+No BSP tree, no vendor kernel. Just mainline plus one panel driver and one device tree.
 
-![glmark2 2611 on Mali-G610](docs/screenshot.jpg)
+Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — same driver, same device tree, same two Kconfig/Makefile lines. The examples below use 7.1; substitute the version you want, or set `KVER` for the build script.
+
+![Google in Chromium on uConsole](docs/screenshot.jpg)
 
 ---
 
@@ -14,7 +16,7 @@ No BSP tree, no vendor kernel. Just mainline `v7.1` plus one panel driver and on
 |---|---|
 | LCD — TXW500170B0-BL (new, Dec 2025+) | ✅ works |
 | LCD — TXW500170B0 (original) | ⚠️ auto-detected, code path present, **untested** — reports welcome |
-| GPU — Mali-G610 (panthor + Mesa panfrost) | ✅ GLES accelerated, glmark2 ≈ 2611 |
+| GPU — Mali-G610 (panthor + Mesa panfrost) | ✅ GLES accelerated, glmark2 ≈ 2270 fullscreen |
 | Wayland — sway, labwc | ✅ works |
 | Internal keyboard + trackball | ✅ works |
 | Ethernet (RTL8211F) | ✅ works |
@@ -34,6 +36,8 @@ No BSP tree, no vendor kernel. Just mainline `v7.1` plus one panel driver and on
 ---
 
 ## Hardware this was built and tested on
+
+![uConsole boards with Radxa CM5](docs/internals.jpg)
 
 - ClockworkPi uConsole (2026 revision, **TXW500170B0-BL** panel — check the sticker on the back of the LCD)
 - Radxa CM5 (RK3588S), 8 GB / 64 GB eMMC
@@ -57,13 +61,14 @@ This project was developed exactly that way: a working BSP image as fallback, th
 
 ## Quick start (prebuilt binaries)
 
-Prebuilt `Image`, DTB and modules are attached to the [latest Release](../../releases/latest). They are a **convenience build, offered as-is and unsupported** — built from the exact sources in this repo, for the exact hardware listed above.
+If a [Release](../../releases) is attached, it carries a prebuilt `Image`, DTB and modules tarball — a **convenience build, offered as-is and unsupported**, produced from the exact sources in this repo for the exact hardware listed above. If there's no Release yet, build from source below; that's the supported path regardless.
 
 ```bash
-# On the device, as root. ADD a boot entry — do not replace your existing one.
-tar xf uconsole-cm5-7.1-modules.tar.gz -C /
-cp Image-7.1 /boot/
-mkdir -p /boot/dtb-7.1 && cp rk3588s-radxa-cm5-uconsole.dtb /boot/dtb-7.1/
+# On the device. ADD a boot entry — do not replace your existing one.
+sudo tar xf uconsole-cm5-modules.tar.gz -C /
+sudo cp Image-7.1 /boot/
+sudo mkdir -p /boot/dtb-7.1
+sudo cp rk3588s-radxa-cm5-uconsole.dtb /boot/dtb-7.1/
 ```
 
 Then add the boot entry and runtime files — see [Deploy](#4-deploy) and [Runtime configuration](#runtime-configuration) below.
