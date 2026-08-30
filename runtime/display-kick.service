@@ -1,0 +1,13 @@
+# /etc/systemd/system/display-kick.service
+
+[Unit]
+Description=Cycle display once to work around first-enable DSI bringup bug
+Before=multi-user.target
+ConditionPathExists=/sys/class/graphics/fb0/blank
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo 1 > /sys/class/graphics/fb0/blank; sleep 1; echo 0 > /sys/class/graphics/fb0/blank'
+
+[Install]
+WantedBy=multi-user.target
