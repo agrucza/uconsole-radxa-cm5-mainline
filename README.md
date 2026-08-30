@@ -82,7 +82,7 @@ Works both **natively on the uConsole** and **cross-compiled from an x86_64 host
 ### 1. Get the kernel
 
 ```bash
-git clone --depth=1 -b v7.1 \
+git clone --depth=1 -b linux-7.1.y \
   https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux-7.1
 ```
 
