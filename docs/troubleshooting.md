@@ -3,6 +3,8 @@
 Everything below was hit for real while bringing mainline 7.1 up on a uConsole + Radxa CM5. Most of these fail *silently* — no error, no log, just something that doesn't work — which is what makes them expensive. Where a cause is inferred rather than proven, it says so.
 
 > **Distro note:** this was done with **Arch Linux ARM** on the device and Arch on the build host. The kernel-level content is distro-agnostic, but package names, `mkinitcpio` vs `dracut`, and bootloader conventions differ elsewhere. Debian/Ubuntu users in particular: your boot entries are likely managed differently, and several packages have other names (`dwarves` vs Arch's `pahole`, for instance).
+>
+> The Debian-specific traps that were hit later (Radxa image base, Debian 13, eMMC) are in the [Debian](#debian) section below and in [debian.md](debian.md). The [power supply](#power-supply-and-battery) section applies to every distro and is worth reading first.
 
 ---
 
@@ -21,10 +23,18 @@ Everything below was hit for real while bringing mainline 7.1 up on a uConsole +
 | `lspci` prints nothing at all | [PCIe controller never registered](#lspci-prints-nothing) |
 | `reboot`/`poweroff` hangs, needs battery pull | [SMMU shutdown hang](#reboot-or-poweroff-hangs) |
 | Device tree change had no effect | [Stale DTB](#your-device-tree-change-did-nothing) |
-| HDMI black | [Connect before power-on](#hdmi-stays-black) |
+| HDMI black | [Connect before power-on](#hdmi-stays-black-console-only) |
 | Build fails: "recursive dependency detected" | [Kconfig `select` vs `depends on`](#build-recursive-dependency-detected) |
 | Build fails: "unterminated argument list" | [Truncated file](#build-unterminated-argument-list-invoking-macro) |
 | Build fails: "recipe commences before first target" | [Broken DTS Makefile edit](#build-recipe-commences-before-first-target) |
+| Grey panel **and** dead keyboard, on every kernel you try | [Check the battery first](#grey-panel-and-dead-keyboard-on-every-kernel) |
+| Device powers off under load | [Weak battery, charger without 5 V default](#device-powers-off-under-load) |
+| Keyboard gone, `lsusb` shows `1eaf:0003 Maple DFU` | [Keyboard MCU in its bootloader](#keyboard-gone-lsusb-shows-maple-dfu) |
+| Debian: unbootable after extracting a modules tarball | [`tar -C /` replaced the `/lib` symlink](#debian-modules-tarball-made-the-system-unbootable) |
+| Debian: mainline boot entry vanishes after `apt` | [`u-boot-update` rewrites extlinux.conf](#debian-apt-removes-the-mainline-boot-entry) |
+| `meshtasticd` segfaults at start | [libgpiod 1 package on a libgpiod 2 kernel](#meshtasticd-segfaults-at-start) |
+| `axp20x-battery` reads return `-6` | [Intermittent bit-banged I²C read](#axp20x-battery-reads-return--6) |
+| Radxa stock kernel: `lsusb` empty | [dwc3 in OTG mode](#radxa-stock-kernel-lsusb-prints-nothing) |
 
 ---
 
@@ -182,6 +192,8 @@ If the console appears, this is your bug.
 **Cause (inferred):** The OCP8178 is a one-wire pulse-protocol chip that latches its state as long as its supply rail stays up — and **warm reboots never drop that rail**. A crashed boot can leave the enable line low long enough to latch the chip *off*, and a steady-high `gpio-backlight` cannot unlatch it, because steady levels aren't the protocol it speaks.
 
 **Fix:** Full power removal (battery disconnect) resets the latch. From a genuine cold start with the enable line coming up high, it powers on correctly. A proper OCP8178 driver port would make this robust — and give brightness steps.
+
+**Fork note:** [`kernel/ocp8178_bl.c`](../kernel/ocp8178_bl.c) is that port. Every entry into the chip's one-wire mode starts with 3 ms of EN low, which is exactly the reset the latch needs, so a warm reboot with that driver should recover on its own. The driver itself is tested; this particular recovery has not been provoked yet. See the [README](../README.md#backlight-dimming).
 
 **Diagnostic worth doing first:** shine a bright flashlight at the dark LCD at an angle. If you can make out a ghost of the console, the panel is working and it's purely a backlight problem.
 
@@ -352,6 +364,51 @@ The AXP is the adapter named after the `i2c-gpio` node (`i2c-axp` here), at addr
 
 ---
 
+## Power supply and battery
+
+### Grey panel and dead keyboard on every kernel
+
+**Symptom:** Backlight on, panel uniformly grey, keyboard never enumerates. `dmesg` shows `dw-mipi-dsi2: command interface is busy` and USB `-71` errors on the internal hub. Switching kernels, DTBs or images changes nothing. `display-kick` does not help.
+
+**Suspected, in order:** the DTS, the HackerGadgets adapter, the AIO rails, the USB3 PHY. Two days.
+
+**Actual cause:** the battery was at 5 % (3.4 V) and one battery lead had gone high-resistance, so the supply sagged the moment the panel and the hub drew current. A module taken warm from the Radxa IO board makes it worse. The same DTS worked the moment the battery was charged and the device got a true cold start (battery disconnected for a minute, charger connected).
+
+**Rule:** check `voltage_now` before any device-tree theory. Details and the numbers to expect are in [battery.md](battery.md). The earlier idea that the AXP was "holding state" across reboots was never isolated and is most likely this same supply problem.
+
+### Device powers off under load
+
+**Symptom:** the uConsole dies under a kernel build or a heavy desktop session, no log, no shutdown.
+
+**Cause:** battery nearly empty and the charger in use delivering nothing. The uConsole negotiates no USB PD; a charger that does not offer 5 V by default provides no VBUS at all (AXP register `0x00` reads `0x00`). The AXP then cuts power hard when the cell sags.
+
+**Fix:** a charger that offers 5 V without PD negotiation and can source about 3 A. Build kernels on the Radxa IO board (12 V) instead of on battery. Install [`runtime/battery/battery-guard`](../runtime/battery/battery-guard) so low battery ends in a clean poweroff rather than a hard cut.
+
+### Keyboard gone, lsusb shows Maple DFU
+
+**Symptom:** after a reboot the keyboard and trackball are gone; `lsusb` shows `1eaf:0003 Maple DFU` instead of the `1eaf:0024` composite device.
+
+**Cause:** the keyboard MCU dropped into its bootloader. Seen once, around a Debian release upgrade, almost certainly coincidence.
+
+**Fix:** a cold start (battery disconnected for a minute). If it ever sticks, the keyboard firmware can be reflashed with `dfu-util`.
+
+### axp20x-battery reads return -6
+
+**Symptom:** occasional `-6` (ENXIO) in `dmesg` from `axp20x-battery`, or a sysfs read that fails once and works the next time.
+
+**Cause:** the AXP sits on a bit-banged I²C bus without external pull-ups; a read occasionally misses. Intermittent, never persistent.
+
+**Fix:** none needed so far. A DTB variant with internal pull-ups on the two GPIOs and a 25 kHz bus is the next step if it ever becomes a problem.
+
+### Dead ends not worth repeating
+
+- Cycling the panel supply in software: ALDO2 also powers the keyboard MCU and the LAN9500A, so it takes both down with the panel.
+- Reading the AIO's Pi GPIO numbers as 40-pin header pins. The AIO sits in the mPCIe slot, whose lines are a different, adapter-remapped set; that misreading produced the false "RTC SDA is the AXP IRQ" verdict. The slot's I²C is I2C7 `m2` and the RTC works there, see [aio-v2.md](aio-v2.md#rtc-works-on-i2c7) and [gpio-map.md](gpio-map.md#expansion-slot-mpcie-routing).
+- `usbcore.old_scheme_first=1` for the `-71` enumeration errors: the errors were the supply.
+- Switching kernels or images before checking the battery.
+
+---
+
 ## Build failures
 
 ### Build: "recursive dependency detected"
@@ -420,6 +477,36 @@ git status --short | grep -E "cwu50|uconsole|Kconfig|Makefile"
 
 ---
 
+## Debian
+
+Radxa's Debian image on the eMMC, upgraded to Debian 13; the full setup is in [debian.md](debian.md).
+
+### Debian: modules tarball made the system unbootable
+
+**Symptom:** `sudo tar xzf modules.tar.gz -C /`, reboot, "required file not found" from the kernel or init, nothing works.
+
+**Cause:** on Debian `/lib` is a symlink to `usr/lib`. A tarball that carries `lib/` as a real directory makes tar replace the symlink with a directory holding only your modules. Everything that lived in `/lib` is now unreachable.
+
+**Fix:** boot the rescue microSD, mount the eMMC root, move the modules to `/usr/lib/modules/`, delete the `lib` directory and recreate the symlink (`ln -s usr/lib lib`). Restore ownership of `/` and `/etc/fstab` to root if the archive was created as another user. Deploy modules with `rsync -a --no-o --no-g` in future, as the README says.
+
+### Debian: apt removes the mainline boot entry
+
+**Symptom:** after `apt upgrade` the device boots the Radxa kernel again (no display, but SSH works). `/boot/extlinux/extlinux.conf` no longer has your entry.
+
+**Cause:** the `u-boot-update` trigger from `u-boot-menu` regenerates the file and only knows the packaged kernels.
+
+**Fix:** hold `u-boot-menu` and the Radxa U-Boot package, keep a reference copy of the working file, and install [`runtime/debian/99-restore-extlinux`](../runtime/debian/99-restore-extlinux), an apt hook that copies it back whenever the mainline label is missing.
+
+### meshtasticd segfaults at start
+
+**Cause:** the Debian 12 `meshtasticd` package is built against libgpiod 1 and this kernel has no `CONFIG_GPIO_CDEV_V1`. The Debian 13 package uses libgpiod 2 and runs. (It still finds no LoRa chip on a Radxa CM5, for hardware reasons; see [aio-v2.md](aio-v2.md#lora-not-available-probably-no-path).) Rebuilding the kernel with `CONFIG_GPIO_CDEV_V1=y` is the alternative if you must keep Bookworm-era gpiod tools.
+
+### Radxa stock kernel: lsusb prints nothing
+
+Only relevant while you still boot the vendor kernel as a fallback: its `usb_host0` controller sits in OTG mode and needs the `rk3588-dwc3-host` overlay to act as a host. Mainline with this repo's DTS sets `dr_mode = "host"` and does not have the problem.
+
+---
+
 ## Miscellaneous
 
 ### The default debug UART is unreachable
@@ -450,4 +537,4 @@ glmark2                        # ~2600 here; llvmpipe scores in the low double d
 ```bash
 grep -H . /sys/class/power_supply/*/{status,online,current_now,capacity}
 ```
-`axp22x-ac/online: 1`, `axp20x-battery/status: Charging`, and a **positive** `current_now` mean it's charging fine. The orange charge LED being dark is a separate, purely cosmetic issue: the AXP's CHGLED pin is under manual control (register `0x32` reads `0x43`) rather than being driven by the charger state machine.
+`axp22x-ac/online: 1`, `axp20x-battery/status: Charging`, and a **positive** `current_now` mean it's charging fine. The orange charge LED being dark is a separate, purely cosmetic issue: the AXP's CHGLED pin is under manual control (register `0x32` reads `0x43`) rather than being driven by the charger state machine. Setting bit 3 of that register fixes it; the fork's `axp-battery-config.service` does so at every boot, see [battery.md](battery.md#the-orange-charge-led).

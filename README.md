@@ -6,6 +6,8 @@ No BSP tree, no vendor kernel. Just mainline plus one panel driver and one devic
 
 Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — same driver, same device tree, same two Kconfig/Makefile lines. The examples below use 7.1; substitute the version you want, or set `KVER` for the build script.
 
+> **About this fork.** Everything upstream describes still applies. On top of it, this fork documents a second, independently brought-up setup: an **original-panel** uConsole, **Debian 13 on the eMMC**, the **HackerGadgets AIO v2** (GPS, SDR and RTC working, LoRa not available), a **10 Ah single-cell battery** with the AXP228 tuned for it, and the small tools that came out of it. Start at [Fork additions](#fork-additions).
+
 ![Google in Chromium on uConsole](docs/screenshot.jpg)
 
 ---
@@ -15,7 +17,7 @@ Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — 
 | Feature | State |
 |---|---|
 | LCD — TXW500170B0-BL (new, Dec 2025+) | ✅ works |
-| LCD — TXW500170B0 (original) | ⚠️ auto-detected, code path present, **untested** — reports welcome |
+| LCD — TXW500170B0 (original) | ✅ works — confirmed on a first-generation unit in this fork (`GPIO probe: old panel`, RDID `93 00 00` after the kick) |
 | GPU — Mali-G610 (panthor + Mesa panfrost) | ✅ GLES accelerated, glmark2 ≈ 2270 fullscreen |
 | Wayland — sway, labwc | ✅ works |
 | Internal keyboard + trackball | ✅ works |
@@ -26,10 +28,13 @@ Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — 
 | Poweroff / reboot | ✅ works (with included shutdown hook) |
 | USB (internal hub, external ports) | ✅ works |
 | HDMI | ✅ under Wayland (hotplug included); ⚠️ boot console needs it connected at power-on |
-| Backlight brightness | ⚠️ on/off only — no dimming steps yet |
-| Orange charge LED | ❌ stays dark (charging itself is fine) |
-| WiFi | via USB dongle (RTW88 configs included); CM5 has no onboard radio |
-| Audio | ❌ not addressed here (no analog DAC on Radxa CM5) |
+| Backlight brightness | ✅ 32 levels with this fork's OCP8178 one-wire driver ([below](#backlight-dimming)); upstream alone is on/off |
+| Orange charge LED | ✅ one AXP228 register bit, set by this fork's battery unit — [docs/battery.md](docs/battery.md#the-orange-charge-led) |
+| WiFi | via USB dongle (RTW88 configs included; RTL8812AU confirmed with `rtw88_8812au`); CM5 has no onboard radio |
+| Audio | ❌ not addressed here (no analog DAC on Radxa CM5); the AIO DTB at least silences the amplifier hiss |
+| HackerGadgets AIO v2: GPS, RTL-SDR, USB hub, RJ45 | ✅ works with the AIO DTB — [docs/aio-v2.md](docs/aio-v2.md) |
+| HackerGadgets AIO v2: RTC | ✅ works on I2C7, the slot's real I²C bus — [docs/aio-v2.md](docs/aio-v2.md#rtc-works-on-i2c7) |
+| HackerGadgets AIO v2: LoRa | ❌ not available, probably no path: MISO arrives at a module position Radxa leaves unconnected; AIO pins still to be measured — [docs/aio-v2.md](docs/aio-v2.md#lora-not-available-probably-no-path) |
 
 **Known workaround required:** the first DSI enable at boot wedges the controller (see [Troubleshooting](docs/troubleshooting.md)). A one-shot systemd service cycles the display at boot and fixes it. This looks like a genuine mainline `dw-mipi-dsi2` bug, not something specific to this board.
 
@@ -45,7 +50,15 @@ Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — 
 - HackerGadgets NVMe board (Samsung SM981 SSD)
 - Arch Linux ARM userspace, Mesa 26.1.4, panthor 1.8.0, CSF firmware v1.5.0
 
-If your hardware differs — original panel, no NVMe board, a different adapter — the device tree may need edits. The panel revision is detected at runtime, so **both panel types should work**; the NVMe/PCIe nodes are harmless if the board is absent.
+The fork's second setup, which confirmed the original-panel path:
+
+- ClockworkPi uConsole (first generation, **TXW500170B0** panel)
+- Radxa CM5 (RK3588S), 32 GB / 256 GB eMMC
+- HackerGadgets Radxa CM5 adapter board, HackerGadgets **AIO v2** with an Intel 512 GB NVMe
+- RTL8812AU USB WiFi module, 10 Ah single-cell battery
+- Debian 13 (Trixie) userspace, Mesa 25, kernel 7.2.6 built with this repo
+
+If your hardware differs — no NVMe board, a different adapter — the device tree may need edits. The panel revision is detected at runtime, so **both panel types should work**; the NVMe/PCIe nodes are harmless if the board is absent.
 
 ---
 
@@ -116,6 +129,21 @@ cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole.dts \
    arch/arm64/boot/dts/rockchip/
 sed -i '/rk3588s-radxa-cm5-io.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole.dtb' \
   arch/arm64/boot/dts/rockchip/Makefile
+
+# Optional: the HackerGadgets AIO v2 variant (GPS on ttyS2, RTC, no serial console,
+# 10 Ah battery labels, OCP8178 backlight dimming) — see docs/aio-v2.md
+cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-aio.dts \
+   arch/arm64/boot/dts/rockchip/
+sed -i '/rk3588s-radxa-cm5-uconsole.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole-aio.dtb' \
+  arch/arm64/boot/dts/rockchip/Makefile
+
+# Required by the AIO variant: the OCP8178 backlight driver
+cp ../uconsole-radxa-cm5-mainline/kernel/ocp8178_bl.c drivers/video/backlight/
+sed -i '/^endif # BACKLIGHT_CLASS_DEVICE/i \
+config BACKLIGHT_OCP8178\n\ttristate "Orient-Chip OCP8178 one-wire backlight (ClockworkPi uConsole)"\n\tdepends on GPIOLIB \&\& OF\n\thelp\n\t  32-level brightness control for the OCP8178 LED driver on the\n\t  ClockworkPi uConsole mainboard, over its single EN line.\n' \
+  drivers/video/backlight/Kconfig
+echo 'obj-$(CONFIG_BACKLIGHT_OCP8178)	+= ocp8178_bl.o' >> drivers/video/backlight/Makefile
+grep -c BACKLIGHT_OCP8178 drivers/video/backlight/Kconfig   # must be 1
 ```
 
 > **Do not** use `sed -i '/^config DRM_PANEL_/i ...'` to insert the Kconfig entry — it matches ~80 lines and inserts a copy before every one of them.
@@ -210,6 +238,71 @@ glxinfo | grep -i renderer     # want "Mali-G610 MC4 (Panfrost)", not "llvmpipe"
 
 ---
 
+## Fork additions
+
+Each of these is self-contained and optional. The files live under `runtime/` and `tools/`; the write-ups are in `docs/`.
+
+| Topic | Read | Files |
+|---|---|---|
+| HackerGadgets AIO v2 on the CM5: rails, GPS, SDR, RTC, why LoRa is not available, the AIO device tree | [docs/aio-v2.md](docs/aio-v2.md) | [`runtime/aio-v2/`](runtime/aio-v2/), [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py), [`tools/sx1262-bitbang.py`](tools/sx1262-bitbang.py) |
+| Battery: the supply-sag trap, charger requirements, AXP228 cutoff and fuel-gauge capacity, clean low-battery poweroff | [docs/battery.md](docs/battery.md) | [`runtime/battery/`](runtime/battery/) |
+| Debian 13 on the eMMC: flashing, rescue SD, boot entries that survive `apt`, Trixie upgrade | [docs/debian.md](docs/debian.md) | [`runtime/debian/`](runtime/debian/) |
+| Backlight dimming: OCP8178 one-wire driver, 32 levels | [below](#backlight-dimming) | [`kernel/ocp8178_bl.c`](kernel/ocp8178_bl.c) |
+| Every header pin with its mainboard net and CM5 alternate functions, and how the mPCIe slot is really routed | [docs/gpio-map.md](docs/gpio-map.md) | – |
+
+Quick install of the runtime pieces (details and the reasons behind each in the linked docs):
+
+```bash
+# AIO v2 rails (needs libgpiod v2 bindings: python3-libgpiod)
+sudo install -m 755 runtime/aio-v2/aio /usr/local/bin/aio
+sudo cp runtime/aio-v2/aio-rails.service /etc/systemd/system/ && sudo systemctl enable aio-rails.service
+sudo mkdir -p /etc/systemd/system/gpsd.service.d
+sudo cp runtime/aio-v2/gpsd-rail.conf /etc/systemd/system/gpsd.service.d/rail.conf
+
+# Battery: AXP settings on every boot, clean poweroff at 3.50 V
+sudo cp runtime/battery/axp-battery-config.service /etc/systemd/system/   # edit the capacity bytes first
+sudo systemctl enable --now axp-battery-config.service
+sudo install -m 755 runtime/battery/battery-guard /usr/local/bin/
+sudo cp runtime/battery/battery-guard.{service,timer} /etc/systemd/system/
+sudo systemctl enable --now battery-guard.timer
+
+# Debian only: keep the mainline boot entry across apt runs
+sudo cp /boot/extlinux/extlinux.conf /root/extlinux.conf.mainline
+sudo cp runtime/debian/99-restore-extlinux /etc/apt/apt.conf.d/
+sudo systemctl daemon-reload
+```
+
+### Backlight dimming
+
+Upstream drives the OCP8178 backlight chip with `gpio-backlight`, so it is on or off. The chip's EN pin also speaks a one-wire protocol, a shutdown-plus-detect sequence followed by an address byte and a 5-bit level, and ClockworkPi's downstream kernels have used it for years. [`kernel/ocp8178_bl.c`](kernel/ocp8178_bl.c) is a mainline-style driver for that protocol: 32 levels at `/sys/class/backlight/backlight/brightness`, so `brightnessctl`, sway's idle handling and the desktop sliders work. Unlike the downstream driver it enters the one-wire mode only when the chip was off, instead of blanking the panel for 3 ms with interrupts disabled on every change; `always_reenter=1` as a module parameter restores the downstream behaviour if a level ever fails to stick. Entering the mode starts with 3 ms of EN low, which also clears the latched-off state described in [troubleshooting](docs/troubleshooting.md#lcd-completely-dark-backlight-latched-off).
+
+The AIO DTS switches the backlight node to this driver. Build step 2 above copies the driver and adds its Kconfig and Makefile lines; the build script checks that `CONFIG_BACKLIGHT_OCP8178=y` ended up in the config, because a kernel without the driver and a DTB that asks for it leaves the panel waiting for its backlight and the screen dark.
+
+**Status: tested 2026-09-20** on the original-panel unit: levels 0 to 31 take effect from sysfs, and after the panel is powered off and on again (sway's idle path) the chip comes back at the previously set level, so the enter-once logic holds. Quick check after building:
+
+```bash
+sudo dmesg | grep -i ocp8178                              # "OCP8178 one-wire backlight, 31 levels, default 31"
+cat /sys/class/backlight/backlight/max_brightness         # 31
+echo 8  | sudo tee /sys/class/backlight/backlight/brightness   # visibly dimmer
+echo 31 | sudo tee /sys/class/backlight/backlight/brightness   # back to full
+```
+
+If a level ever fails to stick, retry with the downstream behaviour before assuming the protocol is wrong: `echo 1 | sudo tee /sys/module/ocp8178_bl/parameters/always_reenter`, then set the brightness again. Note that `actual_brightness` only echoes the last written value; the chip cannot be read back.
+
+### Repository layout
+
+```
+kernel/    panel driver, OCP8178 backlight driver, device tree (+ AIO v2 variant), reproducible build script
+runtime/   system files: display kick, shutdown hook, watchdog, labwc autostart, extlinux example
+  aio-v2/  rail switch `aio`, its boot unit, gpsd drop-in, meshtasticd reference config
+  battery/ AXP228 settings unit, low-battery guard + timer
+  debian/  apt hook that restores the mainline boot entry
+tools/     patch-uconsole-dtb.py (AIO nodes into a built DTB), sx1262-bitbang.py and lora-miso-scan.py (LoRa MISO probes)
+docs/      gpio-map, troubleshooting, aio-v2, battery, debian, kernel-guide
+```
+
+---
+
 ## What's in the device tree
 
 Beyond the stock `rk3588s-radxa-cm5.dtsi`:
@@ -223,6 +316,8 @@ Beyond the stock `rk3588s-radxa-cm5.dtsi`:
 - **`mmu600_pcie` disabled** — its shutdown handler hangs reboot; PCIe works fine without it
 
 Full pin mapping in [`docs/gpio-map.md`](docs/gpio-map.md).
+
+The fork adds [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio.dts), which includes the base file and enables UART2 for the AIO v2 GPS, SPI4 with `spidev`, I2C7 with the AIO's RTC, disables the UART4 console in favour of holding the amplifier enable low, and carries the 10 Ah battery labels. It builds alongside the base DTB; `DTBS_ONLY=1` in the build script rebuilds just the device trees. [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py) produces the same tree from a prebuilt DTB without a kernel tree.
 
 ---
 
@@ -242,7 +337,7 @@ PL2303x and CH340 adapters **cannot** do 1.5 Mbps. Use a CP2102N, FT232H, or CH3
 
 ## Troubleshooting
 
-The nine things that cost the most time during bring-up — inverted panel detection, the DSI first-enable wedge, the SMMU shutdown hang, the earlycon trap, and more — are written up in [`docs/troubleshooting.md`](docs/troubleshooting.md).
+The things that cost the most time during bring-up — inverted panel detection, the DSI first-enable wedge, the SMMU shutdown hang, the earlycon trap, and more — are written up in [`docs/troubleshooting.md`](docs/troubleshooting.md). The fork added the power-supply section (a sagging battery looks exactly like a broken device tree) and the Debian traps.
 
 ---
 
@@ -250,7 +345,8 @@ The nine things that cost the most time during bring-up — inverted panel detec
 
 Useful things to report:
 
-- **Original (pre-2025) panel:** does auto-detection pick it correctly? `dmesg | grep cwu50`
+- **Original (pre-2025) panel:** confirmed working on one unit (see Status); more reports still welcome. `dmesg | grep cwu50`
+- **AIO v2 LoRa on a CM5 with a bodge wire**, or news of HackerGadgets' Radxa variant
 - **Other adapters / no NVMe board:** what needed changing in the DTS
 - **HDMI hotplug**, **backlight dimming**, **charge LED** — all open
 
@@ -260,6 +356,8 @@ Useful things to report:
 - [@dev-null2019](https://github.com/dev-null2019) — Radxa CM5 uConsole device tree overlays that mapped out the hardware
 - randomlinuxuser — Arch Linux Radxa CM5 image, used as the fallback system throughout development
 - Rockchip / Radxa / Collabora upstream work that put RK3588 DSI2 and DCPHY into mainline
+- Radxa's CM5 pinout spreadsheet (`radxa_cm5_v2200_pinout.xlsx`) and ClockworkPi's mainboard and adapter schematics — the sources of the pin map; neither is included in this repo
+- [508-dev/uconsole-scripts](https://github.com/508-dev/uconsole-scripts) — the Pi-side pin numbers for the AIO v2 LoRa module
 
 ## License
 

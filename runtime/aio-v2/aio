@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Switch the power rails of the HackerGadgets AIO v2 on a uConsole with a Radxa CM5.
+
+Needs the libgpiod v2 Python bindings (Debian: python3-libgpiod, Trixie or later)
+and the device tree from this repo (rails are plain GPIOs, nothing claims them).
+
+  aio status                       show every rail
+  aio <gps|lora|sdr|usb> on        drive the enable line high
+  aio <gps|lora|sdr> off           release (gps, lora) or drive low (sdr)
+  aio all off                      gps, lora and sdr off
+
+"on"  drives the line as an output HIGH.
+"off" releases the line (input, high impedance). It does NOT drive it low:
+      an active low on GPIO1_C5 (GPS rail) knocks the keyboard, USB sticks and
+      HDMI DDC off the bus. The SDR rail has an on-board pull-up, so it is on
+      by default and can only be switched off by actively driving it low
+      (tested: disturbs nothing).
+"usb" is never switched off: the fan and the WiFi dongle hang off that hub.
+
+Pin map (see docs/aio-v2.md and docs/gpio-map.md):
+  gps  = GPIO1_C5 (Pi GPIO27)   lora = GPIO1_A4 (Pi GPIO16)
+  sdr  = GPIO1_B5 (Pi GPIO7)    usb  = GPIO1_A7 (Pi GPIO23)
+"""
+import sys
+import gpiod
+from gpiod.line import Direction, Value
+
+CHIP = "/dev/gpiochip1"
+RAILS = {"gps": 21, "usb": 7, "lora": 4, "sdr": 13}   # GPIO1_C5, GPIO1_A7, GPIO1_A4, GPIO1_B5
+DRIVE_LOW = {"sdr"}   # rail with a pull-up: off only by driving it low
+
+
+def on(name):
+    line = RAILS[name]
+    req = gpiod.request_lines(CHIP, consumer="aio", config={
+        line: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE)})
+    req.release()          # the kernel keeps the output state after release
+    print(f"{name}: on")
+
+
+def off(name):
+    if name == "usb":
+        sys.exit("usb: refusing to switch off (fan and WiFi dongle hang off this hub)")
+    line = RAILS[name]
+    if name in DRIVE_LOW:
+        cfg = gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)
+        how = "driven low"
+    else:
+        cfg = gpiod.LineSettings(direction=Direction.INPUT)
+        how = "released"
+    req = gpiod.request_lines(CHIP, consumer="aio", config={line: cfg})
+    req.release()
+    print(f"{name}: off ({how})")
+
+
+def status():
+    with gpiod.Chip(CHIP) as chip:
+        for name, line in RAILS.items():
+            info = chip.get_line_info(line)
+            d = "output" if info.direction == Direction.OUTPUT else "input "
+            try:
+                req = gpiod.request_lines(CHIP, consumer="aio-status", config={
+                    line: gpiod.LineSettings(direction=Direction.AS_IS)})
+                v = req.get_value(line)
+                req.release()
+                level = "high" if v == Value.ACTIVE else "low "
+            except OSError:
+                level = "?   "
+            if d.strip() == "input":
+                if name in DRIVE_LOW:
+                    state = "on (pull-up)" if level == "high" else "off"
+                else:
+                    state = "off (released)"
+            else:
+                state = "on" if level == "high" else "off"
+            print(f"{name:5} line {line:2}  dir={d} level={level}  -> {state}")
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if a == ["status"]:
+        status()
+    elif len(a) == 2 and a[0] in RAILS and a[1] in ("on", "off"):
+        (on if a[1] == "on" else off)(a[0])
+    elif a == ["all", "off"]:
+        off("gps")
+        off("lora")
+        off("sdr")
+    else:
+        sys.exit("usage: aio status | aio <gps|lora|sdr|usb> <on|off> | aio all off")

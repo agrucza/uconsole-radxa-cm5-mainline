@@ -1,0 +1,50 @@
+#!/bin/sh
+# /usr/local/bin/battery-guard
+#
+# Clean poweroff before the battery gets low enough to brown out the mainboard.
+# Run once a minute from battery-guard.timer. Does nothing on external power.
+#
+# Threshold: 3.50 V. The AXP228 hard cutoff is 3.2 V, but the mainboard's 3.3 V
+# rail is a buck fed from the battery and drops out of regulation below about
+# 3.4 V, taking the USB hub, WiFi and the AXP's own I2C bus with it. A measured
+# discharge (docs/battery.md) went from 3.50 V to 3.34 V in 12 minutes, about
+# 4 % of the run, so nothing usable is lost by stopping at 3.50 V.
+#
+# If the AXP stops answering (reads fail with ENXIO) while we are on battery,
+# that is itself the brown-out symptom: after three failed minutes in a row
+# we power off anyway. If the sysfs nodes do not exist at all (other kernel,
+# driver not loaded) we stay out of the way.
+
+THRESHOLD=3500000                 # microvolts
+MAX_FAILS=3
+STATE=/run/battery-guard.fails
+BAT=/sys/class/power_supply/axp20x-battery/voltage_now
+AC=/sys/class/power_supply/axp22x-ac/online
+
+[ -e "$BAT" ] && [ -e "$AC" ] || exit 0
+
+ac=$(cat "$AC" 2>/dev/null)
+v=$(cat "$BAT" 2>/dev/null)
+
+if [ "$ac" = "1" ]; then
+	rm -f "$STATE"
+	exit 0
+fi
+
+if [ -z "$v" ] || [ -z "$ac" ]; then
+	n=$(( $(cat "$STATE" 2>/dev/null || echo 0) + 1 ))
+	echo "$n" > "$STATE"
+	logger -t battery-guard "AXP not readable on battery ($n/$MAX_FAILS)"
+	if [ "$n" -ge "$MAX_FAILS" ]; then
+		logger -t battery-guard "AXP unreadable $n times on battery, powering off"
+		systemctl poweroff
+	fi
+	exit 0
+fi
+
+rm -f "$STATE"
+if [ "$v" -lt "$THRESHOLD" ]; then
+	logger -t battery-guard "battery ${v}uV below ${THRESHOLD}uV, powering off"
+	systemctl poweroff
+fi
+exit 0

@@ -1,0 +1,9 @@
+# /etc/systemd/system/battery-guard.service
+# Triggered by battery-guard.timer; see runtime/battery/battery-guard.
+
+[Unit]
+Description=Power off cleanly before the AXP228 battery cutoff
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/battery-guard

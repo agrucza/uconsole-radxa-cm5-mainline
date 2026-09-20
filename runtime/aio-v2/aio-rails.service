@@ -1,0 +1,18 @@
+# /etc/systemd/system/aio-rails.service
+#
+# Default rail state for the HackerGadgets AIO v2 after boot:
+#   usb  on   (internal USB ports: fan, WiFi dongle)
+#   sdr  off  (has a pull-up, so it would otherwise be on and draw current)
+#   gps, lora stay off (released); gpsd's drop-in switches gps on when needed.
+
+[Unit]
+Description=AIO v2 rails: default state after boot (usb on, sdr off)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aio usb on
+ExecStart=/usr/local/bin/aio sdr off
+
+[Install]
+WantedBy=multi-user.target

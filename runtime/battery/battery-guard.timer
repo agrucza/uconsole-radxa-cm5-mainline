@@ -1,0 +1,11 @@
+# /etc/systemd/system/battery-guard.timer
+
+[Unit]
+Description=Check battery voltage once a minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

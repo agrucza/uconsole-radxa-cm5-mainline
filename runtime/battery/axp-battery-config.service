@@ -1,0 +1,26 @@
+# /etc/systemd/system/axp-battery-config.service
+#
+# Re-apply AXP228 battery settings on every boot. The AXP keeps these registers
+# only while it is powered, so they are lost on every full power loss.
+#
+#   CHGLED               register 0x32 bit 3 = 1: the orange charge LED follows the charger
+#                        (on while charging, off when done). The default 0x43 leaves the
+#                        pin under manual control, i.e. dark. Read-modify-write via -m.
+#   voltage_min  3.2 V   discharge cutoff (register 0x31 = 0x06; default 2.9 V)
+#   0xE0/0xE1            fuel-gauge pack capacity, here 10 000 mAh:
+#                        10000 / 1.456 = 6868 = 0x1AD4 -> 0xE0 = 0x1A | 0x80 (valid bit) = 0x9A, 0xE1 = 0xD4
+#
+# Adjust the two capacity bytes to your pack (docs/battery.md has the formula)
+# and confirm the I2C bus number with `i2cdetect -l` (9 = the i2c-axp adapter
+# in this build; it depends on probe order).
+
+[Unit]
+Description=AXP228: charge LED, 3.2 V cutoff and pack capacity (values do not survive power loss)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'i2cset -f -y -m 0x08 9 0x34 0x32 0x08; echo 3200000 > /sys/class/power_supply/axp20x-battery/voltage_min; i2cset -f -y 9 0x34 0xE0 0x9A; i2cset -f -y 9 0x34 0xE1 0xD4'
+
+[Install]
+WantedBy=multi-user.target

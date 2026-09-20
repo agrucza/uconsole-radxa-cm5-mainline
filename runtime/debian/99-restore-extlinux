@@ -1,0 +1,10 @@
+// /etc/apt/apt.conf.d/99-restore-extlinux
+//
+// On Debian (Radxa image base) the u-boot-update trigger rewrites
+// /boot/extlinux/extlinux.conf after some apt runs and drops any entry it did
+// not generate itself, i.e. the mainline kernel entry. This hook restores a
+// reference copy whenever no "uconsole-*" label is left in the file.
+//
+// Keep the reference copy current:  sudo cp /boot/extlinux/extlinux.conf /root/extlinux.conf.mainline
+// Adjust the label prefix if your boot entries are named differently.
+DPkg::Post-Invoke { "if ! grep -q '^label uconsole-' /boot/extlinux/extlinux.conf; then cp /root/extlinux.conf.mainline /boot/extlinux/extlinux.conf; echo '>>> extlinux.conf: mainline entry restored'; fi"; };

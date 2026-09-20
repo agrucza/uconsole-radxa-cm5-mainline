@@ -1,0 +1,37 @@
+# /etc/meshtasticd/config.d/aio-v2-lora.yaml
+#
+# meshtasticd configuration for the HackerGadgets AIO v2 LoRa module (SX1262)
+# on a uConsole with a Radxa CM5 and the device tree from this repo, patched
+# with tools/patch-uconsole-dtb.py (SPI4 m2 + spidev -> /dev/spidev4.0).
+#
+# REFERENCE ONLY. The chip cannot answer on a Radxa CM5: its MISO line
+# (Pi GPIO19, header pin 35) is not connected on the module, so every read
+# returns 0xff. See docs/aio-v2.md before spending time here.
+#
+# Pi pin numbers come from 508-dev/uconsole-scripts and are translated to
+# RK3588S GPIOs (docs/gpio-map.md):
+#   IRQ (DIO1)  BCM26 -> GPIO3_D0 = gpiochip3 line 24
+#   Busy        BCM24 -> GPIO1_A6 = gpiochip1 line 6
+#   Reset       BCM25 -> GPIO1_B0 = gpiochip1 line 8
+#   SPI1/CE0    BCM18-21 -> SPI4 m2 (spidev4.0), hardware chip select
+Lora:
+  Module: sx1262
+  DIO2_AS_RF_SWITCH: true
+  DIO3_TCXO_VOLTAGE: true
+  spidev: spidev4.0
+  IRQ:
+    pin: 26
+    gpiochip: 3
+    line: 24
+  Busy:
+    pin: 24
+    gpiochip: 1
+    line: 6
+  Reset:
+    pin: 25
+    gpiochip: 1
+    line: 8
+GPS:
+  SerialPath: /dev/ttyS2
+Logging:
+  LogLevel: debug
