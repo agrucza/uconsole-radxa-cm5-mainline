@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ClockworkPi uConsole + Radxa CM5 with the HackerGadgets AIO v2 expansion board.
+ *
+ * Variant of rk3588s-radxa-cm5-uconsole.dts: everything from the base file
+ * applies, this file only adds and overrides. It produces the same tree as
+ *
+ *   tools/patch-uconsole-dtb.py --battery-mah 10000 --battery-mwh 37000 --battery-vmin-mv 3200
+ *
+ * applied to the base DTB, but from source. See docs/aio-v2.md.
+ *
+ *  - UART2 (uart2m0, GPIO0_B5/B6 = CM4 socket pins 8/10) for the AIO GPS -> /dev/ttyS2
+ *  - SPI4 (spi4m2, GPIO1_A0..A3 = the Pi SPI1 pins) with a spidev child for
+ *    the AIO LoRa SX1262 -> /dev/spidev4.0. Cannot work on a Radxa CM5: MISO
+ *    ends on Connector 1 position 26, which the module leaves unconnected
+ *    (measured 2026-09-20). Harmless, kept for a bodge wire.
+ *  - UART4 serial console disabled and GPIO1_B3 hogged low: that pin is PA_EN,
+ *    the AW8110 amplifier enable, on the uConsole mainboard. With the console
+ *    driving it the amplifier hisses on battery. Boot entries for this DTB must
+ *    not carry console=ttyS4.
+ *  - I2C7 (i2c7m2, GPIO3_D2/D3 = the CM4 SDA0/SCL0 pair = the only I2C on the
+ *    uConsole's mPCIe slot, measured 2026-09-20) with the AIO's PCF85063A RTC
+ *    at 0x51. Untested at the time of writing: if the chip does not answer the
+ *    rtc probe fails harmlessly and the bus stays free for i2cdetect.
+ *  - Battery node for a single 10 Ah pouch cell instead of two 18650s. Labels
+ *    for userspace only; the AXP228 fuel gauge is configured at runtime by
+ *    runtime/battery/axp-battery-config.service (docs/battery.md).
+ *  - Backlight driven by the OCP8178 one-wire driver (kernel/ocp8178_bl.c),
+ *    32 brightness levels instead of gpio-backlight's on/off. REQUIRES
+ *    CONFIG_BACKLIGHT_OCP8178 in the kernel: without the driver the panel
+ *    waits for its backlight forever and the display stays dark.
+ */
+
+#include "rk3588s-radxa-cm5-uconsole.dts"
+
+/ {
+	model = "ClockworkPi uConsole (Radxa CM5, HackerGadgets AIO v2)";
+
+	chosen {
+		/* UART4 is disabled below; no serial console on this variant. */
+		/delete-property/ stdout-path;
+	};
+};
+
+/* OCP8178 on GPIO1_B1, same pin as upstream's gpio-backlight, different driver.
+ * Levels 0..31; the panel driver switches it off/on around panel disable/enable. */
+&backlight {
+	compatible = "orientchip,ocp8178";
+	/delete-property/ default-on;
+	default-brightness-level = <31>;
+};
+
+/* 1x JS 1260110 pouch cell, 3.7 V / 10 000 mAh / 37 Wh, with protection board.
+ * voltage-min-design matches the 3.2 V cutoff the AXP is given at runtime. */
+&battery {
+	energy-full-design-microwatt-hours = <37000000>;
+	charge-full-design-microamp-hours = <10000000>;
+	voltage-min-design-microvolt = <3200000>;
+};
+
+/* PA_EN (Pi GPIO11 / socket pin 23): amplifier enable, held low. */
+&gpio1 {
+	pa-en-hog {
+		gpio-hog;
+		gpios = <RK_PB3 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "PA_EN";
+	};
+};
+
+/* AIO GPS on the mainboard's Pi UART0 lines (socket pins 8/10). */
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2m0_xfer>;
+	status = "okay";
+};
+
+&uart4 {
+	status = "disabled";
+};
+
+/* The mPCIe slot's I2C: mainboard nets GPIO44/45 = CM4 SDA0/SCL0 = Connector 1
+ * positions 82/80 = GPIO3_D3/D2 on the CM5. The AIO RTC (PCF85063A) should sit here. */
+&i2c7 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7m2_xfer>;
+	status = "okay";
+
+	rtc@51 {
+		compatible = "nxp,pcf85063a";
+		reg = <0x51>;
+	};
+};
+
+/* AIO LoRa SX1262 on the Pi SPI1 lines: CLK GPIO1_A2, MOSI A1, CS0 A3.
+ * MISO (mainboard net GPIO29, mPCIe pin 20) ends on Connector 1 position 26,
+ * which the Radxa CM5 does not connect (measured 2026-09-20). */
+&spi4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi4m2_pins &spi4m2_cs0>;
+	num-cs = <1>;
+	status = "okay";
+
+	spidev@0 {
+		compatible = "rohm,dh2228fv";
+		reg = <0>;
+		spi-max-frequency = <2000000>;
+	};
+};

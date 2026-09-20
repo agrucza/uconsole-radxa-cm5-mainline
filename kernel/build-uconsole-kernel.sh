@@ -9,6 +9,11 @@
 #   ./build-uconsole-kernel.sh              # build $KVER from default paths
 #   KVER=7.2 ./build-uconsole-kernel.sh     # build a different version
 #   FORCE_DEFCONFIG=1 ./build-uconsole-kernel.sh    # discard existing .config
+#   DTBS_ONLY=1 ./build-uconsole-kernel.sh          # only `make dtbs` (seconds), for DTS edits
+#
+# Device trees built: rk3588s-radxa-cm5-uconsole.dtb (base) and, if its source
+# is present in the tree, rk3588s-radxa-cm5-uconsole-aio.dtb (HackerGadgets
+# AIO v2 variant, see docs/aio-v2.md).
 set -euo pipefail
 
 # Single knob for version bumps — everything else derives from it.
@@ -74,6 +79,8 @@ CONFIG_INPUT_AXP20X_PEK=y
 # ---- Backlight ----
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=y
+# OCP8178 one-wire dimming (kernel/ocp8178_bl.c); the AIO DTS requires it
+CONFIG_BACKLIGHT_OCP8178=y
 # ---- Serial console (UART4 m2 @ 1.5 Mbps) ----
 CONFIG_SERIAL_8250=y
 CONFIG_SERIAL_8250_CONSOLE=y
@@ -100,6 +107,10 @@ CONFIG_RTW88_8821CU=m
 CONFIG_RTW88_8822BU=m
 CONFIG_RTW88_8822CU=m
 CONFIG_RTW88_8723DU=m
+# RTL8812AU (tested: Skyworth module on the internal USB header) — needs
+# firmware rtw88/rtw8812a_fw.bin (Debian: firmware-realtek)
+CONFIG_RTW88_8812A=m
+CONFIG_RTW88_8812AU=m
 # ---- Debug tooling ----
 CONFIG_NETCONSOLE=m
 EOF
@@ -114,7 +125,34 @@ test -f arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dts || { echo "M
 grep -q CWU50 drivers/gpu/drm/panel/Kconfig   || { echo "MISSING Kconfig entry"; exit 1; }
 grep -q cwu50 drivers/gpu/drm/panel/Makefile  || { echo "MISSING Makefile entry"; exit 1; }
 grep -q uconsole arch/arm64/boot/dts/rockchip/Makefile || { echo "MISSING dtb Makefile entry"; exit 1; }
+DTB_DIR="arch/arm64/boot/dts/rockchip"
+DTBS="$DTB_DIR/rk3588s-radxa-cm5-uconsole.dtb"
+HAVE_OCP8178=
+if [ -f drivers/video/backlight/ocp8178_bl.c ]; then
+	grep -q BACKLIGHT_OCP8178 drivers/video/backlight/Kconfig  || { echo "MISSING Kconfig entry for ocp8178_bl"; exit 1; }
+	grep -q ocp8178_bl drivers/video/backlight/Makefile         || { echo "MISSING Makefile entry for ocp8178_bl"; exit 1; }
+	HAVE_OCP8178=1
+	echo "   OCP8178 backlight driver present."
+fi
+if [ -f "$DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dts" ]; then
+	grep -q uconsole-aio "$DTB_DIR/Makefile" || { echo "MISSING dtb Makefile entry for uconsole-aio"; exit 1; }
+	[ -n "$HAVE_OCP8178" ] || { echo "the AIO DTS uses the OCP8178 backlight: add drivers/video/backlight/ocp8178_bl.c (README step 2)"; exit 1; }
+	DTBS="$DTBS $DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dtb"
+	echo "   AIO v2 DTS present, will be built too."
+else
+	echo "   (no rk3588s-radxa-cm5-uconsole-aio.dts in the tree: base DTB only)"
+fi
 echo "   all present."
+
+if [ -n "${DTBS_ONLY:-}" ]; then
+	echo "== DTBS_ONLY: building device trees only =="
+	test -f .config || { echo "no .config yet: run a full build first"; exit 1; }
+	make dtbs
+	echo
+	echo "== DONE. Copy the DTB(s) next to the kernel they belong to: =="
+	for d in $DTBS; do echo "  sudo cp $d /boot/dtb-$KVER/"; done
+	exit 0
+fi
 
 echo "== Config =="
 if [ -n "${FORCE_DEFCONFIG:-}" ]; then
@@ -142,6 +180,9 @@ for sym in DRM_PANEL_CLOCKWORKPI_CWU50 ROCKCHIP_DW_MIPI_DSI2 \
 	grep -q "^CONFIG_${sym}=y" .config || { echo "FAILED: $sym not =y"; exit 1; }
 done
 grep -q "^CONFIG_NETCONSOLE=m" .config || { echo "FAILED: NETCONSOLE not =m"; exit 1; }
+if [ -n "$HAVE_OCP8178" ]; then
+	grep -q "^CONFIG_BACKLIGHT_OCP8178=y" .config || { echo "FAILED: BACKLIGHT_OCP8178 not =y"; exit 1; }
+fi
 echo "   all good."
 
 echo "== Build =="
@@ -152,7 +193,6 @@ rm -rf "$STAGING"
 make INSTALL_MOD_PATH="$STAGING" modules_install
 
 KREL=$(cat include/config/kernel.release)
-DTB="arch/arm64/boot/dts/rockchip/rk3588s-radxa-cm5-uconsole.dtb"
 
 cat << DEPLOY
 
@@ -165,12 +205,12 @@ Deploy ALL THREE artifacts together — a stale DTB fails silently.
   sudo cp arch/arm64/boot/Image /boot/Image-$KVER
   sudo mkdir -p /boot/dtb-$KVER-old
   sudo mv /boot/dtb-$KVER/* /boot/dtb-$KVER-old/ 2>/dev/null || true
-  sudo cp $DTB /boot/dtb-$KVER/
+  sudo cp $DTBS /boot/dtb-$KVER/
   sudo rsync -a --no-o --no-g $STAGING/lib/modules/$KREL /lib/modules/
 
 --- Cross (building on a PC, \$DEV=user@uconsole) ---
   scp arch/arm64/boot/Image \$DEV:/tmp/Image-$KVER
-  scp $DTB \$DEV:/tmp/
+  scp $DTBS \$DEV:/tmp/
   scp drivers/net/netconsole.ko \$DEV:/tmp/
   rsync -a $STAGING/lib/modules/$KREL \$DEV:/tmp/mods/
 
