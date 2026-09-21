@@ -8,9 +8,12 @@ earlier (for example to add the battery values to an existing GPS DTB).
 
 Steps:
   1. UART2 on GPIO0_B5/B6 (uart2m0) for the AIO GPS                  -> /dev/ttyS2
-  2. SPI4 on GPIO1_A0..A3 (spi4m2 = the Pi SPI1 pins) + spidev child -> /dev/spidev4.0
-     (LoRa still cannot work on a Radxa CM5: MISO is not connected, see docs/aio-v2.md.
-     The node is harmless and kept for a future bodge wire.)
+  2. SPI4 left (or put back to) disabled. Earlier versions of this script enabled it
+     with a spidev child for the AIO's LoRa SX1262. LoRa does not work on a Radxa CM5
+     (as far as traced, MISO has no path; see docs/aio-v2.md), and with ClockworkPi's
+     4G board in the slot those lines carry the modem's PCM interface, so an enabled
+     SPI4 would drive against the modem. A DTB patched by an old version gets SPI4
+     disabled again.
   3. UART4 (serial console ttyS4 on GPIO1_B2/B3) disabled and GPIO1_B3 hogged LOW:
      that pin is PA_EN on the uConsole mainboard, the amplifier enable, and the AW8110
      hisses on battery while the console drives it. You lose the serial console.
@@ -124,43 +127,19 @@ else:
     changes.append("UART2 already enabled, pinctrl re-pointed at uart2m0")
 patch_node('\tserial@feb50000 {', edits)
 
-# ---------------------------------------------------------------- 2) SPI4 + spidev for LoRa
-if '\t\t\tspi4m2-pins {' in dts:
-    ph_spi_pins, ph_spi_cs = phandle_of("spi4m2-pins"), phandle_of("spi4m2-cs0")
-else:
-    pull_up_drv1 = phandle_of("pcfg-pull-up-drv-level-1")
-    ph_spi_pins = next_phandle()
-    ph_spi_cs = ph_spi_pins + 1
-    dts = dts.replace('\t\t\tuart2m1-xfer {', f'''\t\t\tspi4m2-pins {{
-\t\t\t\trockchip,pins = <0x01 0x02 0x08 0x{pull_up_drv1:x} 0x01 0x00 0x08 0x{pull_up_drv1:x} 0x01 0x01 0x08 0x{pull_up_drv1:x}>;
-\t\t\t\tphandle = <0x{ph_spi_pins:x}>;
-\t\t\t}};
-
-\t\t\tspi4m2-cs0 {{
-\t\t\t\trockchip,pins = <0x01 0x03 0x08 0x{pull_up_drv1:x}>;
-\t\t\t\tphandle = <0x{ph_spi_cs:x}>;
-\t\t\t}};
-
-\t\t\tuart2m1-xfer {{''', 1)
-    changes.append(f"spi4m2 pinctrl added (phandles 0x{ph_spi_pins:x}/0x{ph_spi_cs:x})")
-
-edits = [(re.compile(r'\t\tpinctrl-0 = <[^>]+>;'), f'\t\tpinctrl-0 = <0x{ph_spi_pins:x} 0x{ph_spi_cs:x}>;')]
+# ---------------------------------------------------------------- 2) SPI4 stays disabled
 i, j = node_span('\tspi@fecb0000 {')
 body = dts[i:j]
-if '\t\tnum-cs = <0x02>;' in body:
-    edits.append(('\t\tnum-cs = <0x02>;', '\t\tnum-cs = <0x01>;'))
-if 'status = "disabled";' in body:
-    edits.append(('\t\tstatus = "disabled";', '''\t\tstatus = "okay";
-
-\t\tspidev@0 {
-\t\t\tcompatible = "rohm,dh2228fv";
-\t\t\treg = <0x00>;
-\t\t\tspi-max-frequency = <0x1e8480>;
-\t\t};'''))
-    changes.append("SPI4 (spi@fecb0000) enabled on spi4m2 with spidev@0 -> /dev/spidev4.0")
+if 'spidev@0 {' in body:
+    # a DTB patched by an earlier version: remove our spidev child, disable the bus
+    body = re.sub(r'\n\n\t\tspidev@0 \{\n(?:.*\n)*?\t\t\};', '', body)
+    body = body.replace('\t\tstatus = "okay";', '\t\tstatus = "disabled";', 1)
+    dts = dts[:i] + body + dts[j:]
+    changes.append("SPI4 (spi@fecb0000) disabled again, spidev@0 removed (LoRa unavailable; the 4G board's PCM lives on these lines)")
+elif 'status = "okay";' in body:
+    changes.append("SPI4 is enabled in this DTB but not by this script; left alone")
 else:
-    changes.append("SPI4 already enabled, pinctrl re-pointed at spi4m2")
-patch_node('\tspi@fecb0000 {', edits)
+    changes.append("SPI4 left disabled")
 
 # ---------------------------------------------------------------- 3) UART4 off, PA_EN hogged low
 if args.keep_console:

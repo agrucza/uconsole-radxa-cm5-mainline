@@ -11,7 +11,7 @@ Everything below was verified on Debian 13 with a mainline 7.2.6 kernel built fr
 | RTL-SDR | USB | USB (AIO hub) | ✅ works |
 | USB hub, RJ45 | USB3, RGMII | `usb_host2` via adapter, native GMAC | ✅ works |
 | RTC PCF85063A | the slot's I²C = CM4 SDA0/SCL0 | GPIO3_D3/D2 = **I2C7 m2** → `/dev/rtc0` | ✅ works |
-| LoRa SX1262 | SPI1 (BCM19/20/21, CE0 BCM18) + IRQ 26, Busy 24, Reset 25 | SPI4 m2: CLK GPIO1_A2, MOSI A1, CS A3 wired; **MISO arrives at Connector 1 position 26, NC on the CM5** | ❌ not available, probably no path; AIO pins still to be measured |
+| LoRa SX1262 | SPI1 (BCM19/20/21, CE0 BCM18) + IRQ 26, Busy 24, Reset 25 | CLK, MOSI, CS reach GPIO1_A2/A1/A3; **MISO arrives at Connector 1 position 26, NC on the CM5**; SPI4 is left disabled | ❌ not available, probably no path; AIO pins still to be measured |
 
 The full pin translation, and how the mPCIe slot's lines really travel from the AIO to the module, is in [gpio-map.md](gpio-map.md#expansion-slot-mpcie-routing).
 
@@ -69,7 +69,7 @@ The receiver sits on the Pi UART0 pins, which on the CM5 are UART2 in its `m0` p
    ```
 
 3. A first fix takes one to two minutes. `gpsmon` or `cgps` shows it.
-4. Because the RTC is unusable, GPS is the time source. `chrony` with `refclock SHM 0 refid GPS` in `/etc/chrony/chrony.conf` picks the fix up from gpsd; NTP covers the rest.
+4. `chrony` with `refclock SHM 0 refid GPS` in `/etc/chrony/chrony.conf` picks the fix up from gpsd and, with `rtcsync`, keeps the AIO's RTC trimmed; NTP covers the rest.
 
 ---
 
@@ -142,7 +142,7 @@ Not working right now, and probably not fixable without a wire: everything trace
 | mainboard + HackerGadgets adapter | mPCIe pin 20 arrives at Connector 1 position 26, nowhere else | **measured** 2026-09-20, continuity |
 | Radxa CM5 | position 26 connects to nothing | documented by Radxa in two places, the pinout spreadsheet (`radxa_cm5_v2200_pinout.xlsx`, from Radxa's documentation: "Raspberry Pi CM4: GPIO19, Radxa CM5: NC") and the `gpio-line-names` in their DTS, where it is the only header position without a label; consistent with every observation |
 
-Consistent with that, `GetStatus` (0xC0) over `/dev/spidev4.0` returns a constant `0xff`, and [`tools/sx1262-bitbang.py`](../tools/sx1262-bitbang.py) shows the SoC-side SPI4 `m2` MISO, GPIO1_A0, following whatever bias it is given. CLK, MOSI, CS, IRQ, Busy and Reset all arrive; only the return path is missing.
+Consistent with that, `GetStatus` (0xC0) over `/dev/spidev4.0` (SPI4 was enabled in the DTS at the time; it no longer is) returned a constant `0xff`, and [`tools/sx1262-bitbang.py`](../tools/sx1262-bitbang.py) shows the SoC-side SPI4 `m2` MISO, GPIO1_A0, following whatever bias it is given. CLK, MOSI, CS, IRQ, Busy and Reset all arrive; only the return path is missing.
 
 What is still open is the AIO board itself: continuity from the SX1262 module's MISO pad to mPCIe finger 20, to be measured once the AIO can come out of the running unit. Until then this stays "probably".
 
@@ -162,7 +162,7 @@ The meshtasticd configuration that would be correct once the chip is reachable i
 
 Two ways to get the same tree; pick by what you have.
 
-**From source, if you have the kernel tree:** [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](../kernel/rk3588s-radxa-cm5-uconsole-aio.dts) includes the base DTS and overrides six nodes: UART2 on `uart2m0` for the GPS, SPI4 on `spi4m2` with a `spidev` child, UART4 disabled with `stdout-path` removed, the `PA_EN` hog on GPIO1_B3, I2C7 on `i2c7m2` with the RTC child, and the battery node for a single 10 Ah cell. Copy it next to the base DTS and add its Makefile line (README, step 2), then:
+**From source, if you have the kernel tree:** [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](../kernel/rk3588s-radxa-cm5-uconsole-aio.dts) includes the base DTS and overrides five nodes: UART2 on `uart2m0` for the GPS, UART4 disabled with `stdout-path` removed, the `PA_EN` hog on GPIO1_B3, I2C7 on `i2c7m2` with the RTC child, and the battery node for a single 10 Ah cell. SPI4 is deliberately left disabled, see [Other boards in the slot](#other-boards-in-the-slot). Copy it next to the base DTS and add its Makefile line (README, step 2), then:
 
 ```bash
 DTBS_ONLY=1 KDIR=$PWD ~/build-uconsole-kernel.sh      # seconds, no kernel rebuild
@@ -176,7 +176,7 @@ Edit the battery values in the DTS if your pack differs. A full build produces b
 | Change | Why | Control |
 |---|---|---|
 | UART2 enabled on `uart2m0` (GPIO0_B5/B6) | AIO GPS → `/dev/ttyS2` | always |
-| SPI4 enabled on `spi4m2` (GPIO1_A0..A3), one chip select, `spidev` child | AIO LoRa → `/dev/spidev4.0`. Harmless while LoRa is blocked; ready for a bodge wire | always |
+| SPI4 left disabled; a DTB from an earlier version of the script gets it disabled again | LoRa has no path, and with the 4G board in the slot these lines are the modem's PCM interface | always |
 | **UART4 disabled**, GPIO1_B3 hogged low as `PA_EN` | GPIO1_B3 is the amplifier enable on the mainboard. With the console on it the AW8110 hisses on battery. **You lose the serial console.** | default; `--keep-console` skips it |
 | I2C7 enabled on `i2c7m2` (GPIO3_D2/D3), `rtc@51` child (PCF85063A) | the mPCIe slot's I²C bus, the AIO RTC → `/dev/rtc0`; see [RTC](#rtc-works-on-i2c7) | always |
 | `simple-battery` node updated | upstream describes two 18650 cells (6700 mAh, 24.79 Wh, 2.9 V min). Userspace reads these as `charge_full_design` etc.; the AXP gauge does not (see [battery.md](battery.md)) | only with `--battery-mah`, plus `--battery-mwh` and `--battery-vmin-mv` |
@@ -197,11 +197,32 @@ The script prints what it changed and what it found already in place. Decide abo
 Then add a **second** boot entry that points at the new DTB and drops `console=ttyS4,1500000` from the command line. Keep the entry with the unpatched DTB as the fallback; [`runtime/extlinux.conf.example`](../runtime/extlinux.conf.example) shows both. Verify after the reboot:
 
 ```bash
-ls -l /dev/ttyS2 /dev/spidev4.0
+ls -l /dev/ttyS2 /dev/rtc0
 tr -d '\0' < /sys/firmware/devicetree/base/serial@feb70000/status    # disabled
 ```
 
 Both paths end in the same tree; the patch-script output has been running on hardware since 2026-09-20, the DTS is the readable form of it. Verify the source build once by decompiling both with `dtc -I dtb -O dts` and diffing: only node order and phandle numbers should differ.
+
+---
+
+## Other boards in the slot
+
+The AIO v2 is not the only thing that goes into the mPCIe slot, and the slot's lines mean something different on every board. Two rules follow, both learned from ClockworkPi's schematic of their own 4G board:
+
+- **SPI4 stays disabled in the AIO DTS.** On the 4G board the lines the AIO uses for LoRa SPI are the modem's PCM audio interface, and the modem drives the PCM clock and data-out itself. An enabled SPI4 would hold its clock and chip select against those outputs. Since LoRa has no path on the CM5 anyway, the AIO DTS does not enable SPI4, and [`tools/patch-uconsole-dtb.py`](../tools/patch-uconsole-dtb.py) disables it again in a DTB patched by an older version.
+- **`aio-rails.service` runs only with the AIO present.** `aio usb on` drives the line that, on the 4G board, is the modem's STATUS output. The unit therefore carries `ConditionPathExists=/sys/bus/i2c/devices/7-0051`: the AIO's RTC on I2C7 is the one thing in that slot no other board has. With any other board the unit is skipped. The gpsd drop-in only acts when gpsd runs, which nobody enables without the AIO.
+
+What is known about the boards in this collection, from the makers' pages and the schematics; "expected" means not tried here:
+
+| Board | Slot lines it uses | With the AIO DTS on the CM5 |
+|---|---|---|
+| HackerGadgets AIO v2 | USB pair, UART (GPS, PPS on the BCM6 line), the slot I²C (RTC), the LoRa lines, four rail enables; Ethernet and USB 3.0 via the adapter | GPS, SDR, RTC, hub, RJ45 work; LoRa no path |
+| HackerGadgets AIO v1 | same, but the rails are always on per HackerGadgets' guide; USB 2.0 hub, no RJ45 | expected: as v2 without the rail switching |
+| HackerGadgets RJ45 / USB 3.0 board | Ethernet via the adapter's CSI routing, USB 3.0 via the adapter's connector, USB 2.0 pair; its 17-pin GPIO header is the slot's lines brought out | works |
+| uCon USB expansion 3+1+1 (uHub design) | USB 2.0 pair only | expected to just work |
+| ClockworkPi 4G EXT | UART, PCM, the slot I²C, modem NETLIGHT and STATUS outputs on two slot lines, power key and reset on others | UART2 from the AIO DTS is what the modem needs; untested here |
+
+HackerGadgets' setup guide also names the AIO's GPS PPS output, BCM6 in Pi numbering, which reaches GPIO4_A2 on the CM5. A `pps-gpio` node there would give chrony a pulse-per-second reference; not tried yet.
 
 ---
 

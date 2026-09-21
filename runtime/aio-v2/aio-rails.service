@@ -4,10 +4,17 @@
 #   usb  on   (internal USB ports: fan, WiFi dongle)
 #   sdr  off  (has a pull-up, so it would otherwise be on and draw current)
 #   gps, lora stay off (released); gpsd's drop-in switches gps on when needed.
+#
+# Only runs when the AIO v2 is actually in the slot: its PCF85063A RTC answers on
+# I2C7 (i2c-7, address 0x51) and nothing else in that slot has one. With another
+# expansion board the same slot lines mean something else; on ClockworkPi's 4G
+# board the "usb" line is the modem's STATUS output, and driving it high would
+# fight the modem. See docs/aio-v2.md, "Other boards in the slot".
 
 [Unit]
 Description=AIO v2 rails: default state after boot (usb on, sdr off)
 After=multi-user.target
+ConditionPathExists=/sys/bus/i2c/devices/7-0051
 
 [Service]
 Type=oneshot

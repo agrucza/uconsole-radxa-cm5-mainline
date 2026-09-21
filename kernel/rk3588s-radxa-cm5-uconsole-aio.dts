@@ -10,10 +10,12 @@
  * applied to the base DTB, but from source. See docs/aio-v2.md.
  *
  *  - UART2 (uart2m0, GPIO0_B5/B6 = CM4 socket pins 8/10) for the AIO GPS -> /dev/ttyS2
- *  - SPI4 (spi4m2, GPIO1_A0..A3 = the Pi SPI1 pins) with a spidev child for
- *    the AIO LoRa SX1262 -> /dev/spidev4.0. Cannot work on a Radxa CM5: MISO
- *    ends on Connector 1 position 26, which the module leaves unconnected
- *    (measured 2026-09-20). Harmless, kept for a bodge wire.
+ *  - SPI4 is deliberately NOT enabled. The AIO's LoRa SX1262 would sit on
+ *    those lines, but as far as the routing has been traced its MISO arrives
+ *    at a module position the Radxa CM5 leaves unconnected (not fully
+ *    measured yet, see docs/aio-v2.md), and with ClockworkPi's 4G board in
+ *    the slot the same lines carry the modem's PCM interface: an enabled SPI4
+ *    would drive its clock and chip select against the modem's outputs.
  *  - UART4 serial console disabled and GPIO1_B3 hogged low: that pin is PA_EN,
  *    the AW8110 amplifier enable, on the uConsole mainboard. With the console
  *    driving it the amplifier hisses on battery. Boot entries for this DTB must
@@ -92,18 +94,3 @@
 	};
 };
 
-/* AIO LoRa SX1262 on the Pi SPI1 lines: CLK GPIO1_A2, MOSI A1, CS0 A3.
- * MISO (mainboard net GPIO29, mPCIe pin 20) ends on Connector 1 position 26,
- * which the Radxa CM5 does not connect (measured 2026-09-20). */
-&spi4 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&spi4m2_pins &spi4m2_cs0>;
-	num-cs = <1>;
-	status = "okay";
-
-	spidev@0 {
-		compatible = "rohm,dh2228fv";
-		reg = <0>;
-		spi-max-frequency = <2000000>;
-	};
-};

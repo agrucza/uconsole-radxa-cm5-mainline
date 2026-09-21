@@ -2,7 +2,8 @@
 #
 # meshtasticd configuration for the HackerGadgets AIO v2 LoRa module (SX1262)
 # on a uConsole with a Radxa CM5 and the device tree from this repo, patched
-# with tools/patch-uconsole-dtb.py (SPI4 m2 + spidev -> /dev/spidev4.0).
+# with an early version of tools/patch-uconsole-dtb.py (SPI4 m2 + spidev -> /dev/spidev4.0).
+# The AIO DTS no longer enables SPI4 (docs/aio-v2.md, "Other boards in the slot").
 #
 # REFERENCE ONLY. The chip cannot answer on a Radxa CM5: its MISO line
 # (Pi GPIO19, header pin 35) is not connected on the module, so every read
