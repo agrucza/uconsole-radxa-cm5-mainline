@@ -55,9 +55,40 @@ A boot menu that has served well: Radxa's `l0`/`l0r` entries (emergency), one en
 echo '$nrconf{kernelhints} = 0;' | sudo tee /etc/needrestart/conf.d/no-kernel-hint.conf
 ```
 
+## Radxa leftovers
+
+Radxa's image is a Debian with a layer of BSP packages on top, and that layer does not go away with the release upgrade. Some of it quietly overrides Trixie's own files through **dpkg diversions**: the package moves Debian's file aside as `*.bak` and puts its own copy in place, upgrades and even `apt install --reinstall` land in the `.bak`, and `dpkg -V` stays happy because it checks the diverted file. Two of these bit here.
+
+- **`radxa-system-config-rockchip` breaks GDM.** It diverts `/usr/share/gdm/gdm.schemas` to a copy from an older GDM. Trixie's GDM 48 asks that file for `daemon/RemoteLoginEnable`, does not find it, and dies at start with
+
+  ```
+  Gdm:ERROR:../common/gdm-settings-direct.c:148:gdm_settings_direct_get_boolean: assertion failed: (entry != NULL)
+  ```
+
+  The same package blacklists `panfrost` in `/etc/modprobe.d` for Radxa's vendor GPU stack; harmless on this kernel only because the G610 uses `panthor`. Removing it takes Radxa's `task-rk3588` and `task-rockchip` meta packages along and nothing else; the Radxa kernel package stays.
+
+  ```bash
+  sudo apt purge radxa-system-config-rockchip radxa-system-config-rockchip-glamor task-rk3588 task-rockchip
+  grep -c RemoteLoginEnable /usr/share/gdm/gdm.schemas     # 1
+  ```
+
+- **`radxa-desktop-branding`** puts Radxa's logo on the GDM login screen through the `vendor-logos` alternative and diverts a few KDE and SDDM files. Its removal script trips over its own diversions when both the diverted file and the `.bak` exist; delete the diverted-in copy it names and run the purge again:
+
+  ```bash
+  sudo apt purge radxa-desktop-branding        # may fail on /etc/skel/.face, /etc/xdg/kcm-about-distrorc, ...
+  sudo rm -f /etc/skel/.face /etc/xdg/kcm-about-distrorc /usr/share/sddm/themes/breeze/theme.conf
+  sudo apt purge radxa-desktop-branding
+  ```
+
+To see what else is diverted: `dpkg-divert --list | grep -v "by [^r]"`. What remained here and does no harm: `radxa-firmware` (diverts a few firmware blobs), `rsetup`, the held U-Boot packages, and the Radxa kernel as the emergency boot entry.
+
+One more thing to know about `rsetup`: its package trigger runs `u-boot-update`, so **every apt run that touches it rewrites `extlinux.conf`**. That is what the apt hook above is for; keep the reference copy current after every deliberate change to the boot menu.
+
 ## Desktop
 
-sway from Trixie, started from `.bash_profile` on tty1 (no display manager, no autologin). Config points that matter on this device:
+Two desktops have run on this system; both need Mesa 25 from Trixie and the panthor kernel driver, and both rotate the panel in software.
+
+**sway**, started from `.bash_profile` on tty1 (no display manager, no autologin). Config points that matter on this device:
 
 ```
 set $mod Mod1                       # Alt: the uConsole keyboard has no usable Super key
@@ -66,7 +97,26 @@ input type:keyboard xkb_layout us
 exec swayidle -w timeout 120 'swaymsg "output DSI-1 power off"' resume 'swaymsg "output DSI-1 power on"'
 ```
 
-`foot` and `wofi` fit the screen. Confirm the GPU is in use with `glxinfo | grep -i renderer` (want Panfrost, not llvmpipe).
+`foot` and `wofi` fit the screen.
+
+**GNOME**, `gnome-core` with GDM, since 2026-09-20. Clear the Radxa leftovers above first, or GDM will not start. Delete the sway autostart from `.bash_profile`, since GDM takes tty1, and check that `graphical.target` is the default.
+
+**Disable suspend before the first battery session.** GNOME suspends automatically after 20 minutes idle on battery, and suspend-to-RAM does not work on this board with this kernel: the SoC enters deep sleep and never resumes, the power button does not bring it back, and only removing the battery ends it. Mask it at the systemd level so no desktop setting can trigger it:
+
+```bash
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+``` Rotation is set once in Settings → Displays and lands in `~/.config/monitors.xml`; the login screen has its own copy:
+
+```bash
+sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml
+sudo chown Debian-gdm:Debian-gdm /var/lib/gdm3/.config/monitors.xml
+```
+
+At 1280×720 on five inches GNOME is usable at 100 %; Large Text under Accessibility is the middle ground. The brightness slider and idle dimming work through `/sys/class/backlight` with this fork's [OCP8178 driver](../README.md#backlight-dimming). If the login screen greets you by the wrong name after a user rename, that is the full-name field in `/etc/passwd`, not the login: `sudo chfn -f "Name" user`.
+
+With either desktop, confirm the GPU is in use with `glxinfo | grep -i renderer` (want Panfrost, not llvmpipe).
 
 ## WiFi
 

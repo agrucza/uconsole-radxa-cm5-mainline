@@ -137,6 +137,10 @@ cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-aio.dts \
 sed -i '/rk3588s-radxa-cm5-uconsole.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole-aio.dtb' \
   arch/arm64/boot/dts/rockchip/Makefile
 
+# Battery status fix: report "Full" once the AXP has terminated instead of
+# "Charging" forever (docs/battery.md); applies to 7.2 and current mainline
+patch -p1 < ../uconsole-radxa-cm5-mainline/kernel/0001-axp20x_battery-report-full-after-charge-termination.patch
+
 # Required by the AIO variant: the OCP8178 backlight driver
 cp ../uconsole-radxa-cm5-mainline/kernel/ocp8178_bl.c drivers/video/backlight/
 sed -i '/^endif # BACKLIGHT_CLASS_DEVICE/i \
@@ -278,7 +282,7 @@ Upstream drives the OCP8178 backlight chip with `gpio-backlight`, so it is on or
 
 The AIO DTS switches the backlight node to this driver. Build step 2 above copies the driver and adds its Kconfig and Makefile lines; the build script checks that `CONFIG_BACKLIGHT_OCP8178=y` ended up in the config, because a kernel without the driver and a DTB that asks for it leaves the panel waiting for its backlight and the screen dark.
 
-**Status: tested 2026-09-20** on the original-panel unit: levels 0 to 31 take effect from sysfs, and after the panel is powered off and on again (sway's idle path) the chip comes back at the previously set level, so the enter-once logic holds. Quick check after building:
+**Status: tested 2026-09-20/21** on the original-panel unit: levels 0 to 31 take effect from sysfs, the panel comes back at the previously set level after being powered off and on again (sway's idle path and GNOME's screen blanking alike), and under GNOME the keyboard's brightness keys and the Settings slider control it, so the enter-once logic holds in daily use. Quick check after building:
 
 ```bash
 sudo dmesg | grep -i ocp8178                              # "OCP8178 one-wire backlight, 31 levels, default 31"
@@ -292,7 +296,7 @@ If a level ever fails to stick, retry with the downstream behaviour before assum
 ### Repository layout
 
 ```
-kernel/    panel driver, OCP8178 backlight driver, device tree (+ AIO v2 variant), reproducible build script
+kernel/    panel driver, OCP8178 backlight driver, AXP battery status patch, device tree (+ AIO v2 variant), build script
 runtime/   system files: display kick, shutdown hook, watchdog, labwc autostart, extlinux example
   aio-v2/  rail switch `aio`, its boot unit, gpsd drop-in, meshtasticd reference config
   battery/ AXP228 settings unit, low-battery guard + timer

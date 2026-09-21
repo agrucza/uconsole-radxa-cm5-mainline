@@ -69,7 +69,7 @@ Two things push the percentage the same way. The gauge started 10 to 15 points t
 
 Measure it instead of guessing:
 
-1. Charge until `status` reads `Full` (the current tapers off).
+1. Charge until the AXP has terminated. With an unpatched kernel the sysfs `status` keeps saying `Charging` even then, because the driver derives it from the current-direction flag, which the 1 mA residual current still trips; the chip's own flag is register 0x01 bit 6, `sudo i2cget -f -y 9 0x34 0x01` reading for example `0x30` means "not charging or charge finished". [`kernel/0001-axp20x_battery-report-full-after-charge-termination.patch`](../kernel/0001-axp20x_battery-report-full-after-charge-termination.patch) makes the driver consult that flag and report `Full`; with it applied, `status` is the check. The charge LED going out says the same thing without a terminal.
 2. Log `voltage_now`, `current_now` and `capacity` once a minute until the guard powers the device off. Sum `current_now` (absolute value, it may be negative while discharging) over the minutes and divide by 60 000 for mAh.
 3. Put that number through the formula above and write the two bytes into `axp-battery-config.service`. Compare percentage against voltage on the next run.
 4. Do not trust readings from the last minutes of a run; once reads fail the mainboard is already browning out.
