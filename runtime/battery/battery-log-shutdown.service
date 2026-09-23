@@ -1,0 +1,15 @@
+# /etc/systemd/system/battery-log-shutdown.service
+# Does nothing at start; at shutdown its ExecStop writes the "shutdown" line,
+# so a gap in /var/log/battery.csv can be told from a crash or a brown-out.
+
+[Unit]
+Description=Write a shutdown marker to the battery log
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/battery-log shutdown
+
+[Install]
+WantedBy=multi-user.target

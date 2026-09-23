@@ -1,25 +1,25 @@
 # /etc/meshtasticd/config.d/aio-v2-lora.yaml
 #
 # meshtasticd configuration for the HackerGadgets AIO v2 LoRa module (SX1262)
-# on a uConsole with a Radxa CM5 and the device tree from this repo, patched
-# with an early version of tools/patch-uconsole-dtb.py (SPI4 m2 + spidev -> /dev/spidev4.0).
-# The AIO DTS no longer enables SPI4 (docs/aio-v2.md, "Other boards in the slot").
+# on a uConsole with a Radxa CM5, booted with kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts.
 #
-# REFERENCE ONLY. The chip cannot answer on a Radxa CM5: its MISO line
-# (Pi GPIO19, header pin 35) is not connected on the module, so every read
-# returns 0xff. See docs/aio-v2.md before spending time here.
+# Needs the one-wire fix on the AIO (MISO pad -> TP2, docs/aio-v2.md, "The one-wire
+# fix"). As delivered the chip cannot answer on a Radxa CM5: its MISO line (AIO edge
+# finger 20) ends on a module position the CM5 leaves unconnected and every read is 0xff.
+# Chip answers over this bus since 2026-09-23 (GetStatus 0x2A, sync word register 0x14).
 #
 # Pi pin numbers come from 508-dev/uconsole-scripts and are translated to
 # RK3588S GPIOs (docs/gpio-map.md):
 #   IRQ (DIO1)  BCM26 -> GPIO3_D0 = gpiochip3 line 24
 #   Busy        BCM24 -> GPIO1_A6 = gpiochip1 line 6
-#   Reset       BCM25 -> GPIO1_B0 = gpiochip1 line 8
-#   SPI1/CE0    BCM18-21 -> SPI4 m2 (spidev4.0), hardware chip select
+#   Reset       BCM25 -> GPIO1_B0 = gpiochip1 line 8 (not used, see below)
+#   SPI         spi-gpio bus, alias spi5 -> /dev/spidev5.0 (SCK GPIO1_A2, MOSI GPIO1_A1,
+#               CS GPIO1_A3, MISO GPIO1_C2 = TP2)
 Lora:
   Module: sx1262
   DIO2_AS_RF_SWITCH: true
   DIO3_TCXO_VOLTAGE: true
-  spidev: spidev4.0
+  spidev: spidev5.0
   IRQ:
     pin: 26
     gpiochip: 3
@@ -28,10 +28,10 @@ Lora:
     pin: 24
     gpiochip: 1
     line: 6
-  Reset:
-    pin: 25
-    gpiochip: 1
-    line: 8
+  # Reset (BCM25 -> GPIO1_B0 = gpiochip1 line 8) is deliberately NOT given to
+  # meshtasticd: after a pulse on NRESET this chip stayed dark until its rail
+  # had been power-cycled (2026-09-23). The lora-power.conf drop-in cycles the
+  # rail before start instead, so RadioLib begins from a fresh power-on state.
 GPS:
   SerialPath: /dev/ttyS2
 Logging:

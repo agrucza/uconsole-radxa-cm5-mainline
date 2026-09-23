@@ -1,0 +1,11 @@
+# /etc/logrotate.d/battery-log
+# One line a minute is about 30 MB a year uncompressed; keep two years.
+/var/log/battery.csv {
+    monthly
+    rotate 24
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+}

@@ -1,0 +1,61 @@
+#!/bin/sh
+# /usr/local/bin/battery-log
+#
+# Append one line per minute with the battery state to a CSV file, so that a
+# discharge or charge can be measured after the fact instead of by starting a
+# logger by hand at the right moment. Run from battery-log.timer; the first run
+# after boot writes a "boot" line first, battery-log-shutdown.service writes a
+# "shutdown" line when the system goes down. Values that cannot be read (the
+# AXP's intermittent -6 reads, docs/battery.md) are logged as empty fields, the
+# line itself is never dropped, so the minute count stays honest.
+#
+# Columns: time,status,ac,voltage_uV,current_uA,capacity_pct,gauge_reg
+#   status   the driver's status (Charging/Discharging/Full/Not charging) or
+#            the markers boot / shutdown
+#   ac       1 = external power present
+#   gauge_reg  AXP228 register 0xB9 raw, if i2c-tools is installed. 0xE4 that
+#            never moves through a discharge is the "still calculating"
+#            placeholder (the trap of the 2026-09-21 run); bit 7 by itself is
+#            also set while charging, next to a live percentage.
+#
+# The mAh drawn between two points in time, from the current column:
+#   awk -F, '$1>="2026-09-24T08:00" && $1<="2026-09-24T14:00" && $5<0 {s+=-$5; n++}
+#            END{printf "%.0f mAh over %d min\n", s/60000, n}' /var/log/battery.csv
+
+LOG=/var/log/battery.csv
+BAT=/sys/class/power_supply/axp20x-battery
+AC=/sys/class/power_supply/axp22x-ac/online
+FLAG=/run/battery-log.booted
+
+[ -d "$BAT" ] || exit 0
+
+rd() { cat "$1" 2>/dev/null; }
+
+gauge() {
+	command -v i2cget >/dev/null 2>&1 || return 0
+	dev=$(ls -d /sys/bus/i2c/devices/*-0034 2>/dev/null | head -n 1)
+	[ -n "$dev" ] || return 0
+	bus=${dev##*/}; bus=${bus%-0034}
+	i2cget -f -y "$bus" 0x34 0xB9 2>/dev/null
+}
+
+line() {
+	printf '%s,%s,%s,%s,%s,%s,%s\n' "$(date -Is)" "$1" "$(rd "$AC")" \
+		"$(rd "$BAT/voltage_now")" "$(rd "$BAT/current_now")" \
+		"$(rd "$BAT/capacity")" "$(gauge)" >> "$LOG"
+}
+
+[ -s "$LOG" ] || echo "time,status,ac,voltage_uV,current_uA,capacity_pct,gauge_reg" >> "$LOG"
+
+case "$1" in
+shutdown)
+	line shutdown
+	exit 0
+	;;
+esac
+
+if [ ! -e "$FLAG" ]; then
+	: > "$FLAG"
+	line boot
+fi
+line "$(rd "$BAT/status")"

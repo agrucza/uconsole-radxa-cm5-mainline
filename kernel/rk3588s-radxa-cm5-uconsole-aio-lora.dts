@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ClockworkPi uConsole + Radxa CM5 + HackerGadgets AIO v2 WITH THE LoRa MISO WIRE.
+ *
+ * Everything from rk3588s-radxa-cm5-uconsole-aio.dts applies; this file only adds
+ * a software SPI bus for the AIO's SX1262 (Heltec HT-RA62). It is for an AIO
+ * that has been modified: a wire from the module's MISO pad (pad 13) to the
+ * AIO's test pad TP2. TP2 is edge finger 44, which reaches GPIO1_C2 on the CM5,
+ * whereas the board's own MISO line (finger 20) ends on a module position the
+ * Radxa CM5 leaves unconnected. See docs/aio-v2.md, "The one-wire fix".
+ *
+ * Boot this DTB only with the modified AIO in the slot. The three lines
+ * driven here (GPIO1_A1/A2/A3) carry ClockworkPi's 4G board's PCM interface;
+ * with that board in the slot use the base or the plain AIO DTB.
+ *
+ * GPIO1_C2 has no hardware SPI function, hence spi-gpio instead of SPI4.
+ * The SX1262's IRQ (GPIO3_D0), Busy (GPIO1_A6) and Reset (GPIO1_B0) are left
+ * unclaimed on purpose: meshtasticd drives them through libgpiod.
+ */
+
+#include "rk3588s-radxa-cm5-uconsole-aio.dts"
+
+/ {
+	model = "ClockworkPi uConsole (Radxa CM5, HackerGadgets AIO v2, LoRa wire)";
+
+	aliases {
+		spi5 = &lora_spi;	/* fixed bus number: /dev/spidev5.0 */
+	};
+
+	lora_spi: spi-lora {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		sck-gpios  = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;	/* mPCIe 24 */
+		mosi-gpios = <&gpio1 RK_PA1 GPIO_ACTIVE_HIGH>;	/* mPCIe 22 */
+		miso-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_HIGH>;	/* mPCIe 44 = TP2, the wire */
+		cs-gpios   = <&gpio1 RK_PA3 GPIO_ACTIVE_LOW>;	/* mPCIe 18, NSS */
+		num-chipselects = <1>;
+
+		lora@0 {
+			/* spidev; same placeholder compatible the old SPI4 node used */
+			compatible = "rohm,dh2228fv";
+			reg = <0>;
+			spi-max-frequency = <2000000>;
+		};
+	};
+};

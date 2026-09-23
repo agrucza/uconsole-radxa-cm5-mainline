@@ -80,6 +80,14 @@ Radxa's image is a Debian with a layer of BSP packages on top, and that layer do
   sudo apt purge radxa-desktop-branding
   ```
 
+- **`radxa-sddm-theme`** cannot be removed once the branding package is gone: its removal script does a plain `rm` on a theme file that no longer exists, dpkg stops, and every later apt run ends with "1 not fully installed or removed". Make the script tolerant and let dpkg finish:
+
+  ```bash
+  sudo sed -i -e 's|^\(\s*\)rm "|\1rm -f "|' -e 's|^\(\s*dpkg-divert .*\)$|\1 \|\| true|' /var/lib/dpkg/info/radxa-sddm-theme.postrm
+  sudo dpkg --remove radxa-sddm-theme
+  sudo apt install -f
+  ```
+
 To see what else is diverted: `dpkg-divert --list | grep -v "by [^r]"`. What remained here and does no harm: `radxa-firmware` (diverts a few firmware blobs), `rsetup`, the held U-Boot packages, and the Radxa kernel as the emergency boot entry.
 
 One more thing to know about `rsetup`: its package trigger runs `u-boot-update`, so **every apt run that touches it rewrites `extlinux.conf`**. That is what the apt hook above is for; keep the reference copy current after every deliberate change to the boot menu.
@@ -107,12 +115,15 @@ exec swayidle -w timeout 120 'swaymsg "output DSI-1 power off"' resume 'swaymsg 
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
-``` Rotation is set once in Settings → Displays and lands in `~/.config/monitors.xml`; the login screen has its own copy:
+```
+
+**The power button after that.** GNOME's default action for a short press is suspend too, and with the targets masked a short press now does nothing at all (under sway, where logind handles the key, it powers off). Give it a job:
 
 ```bash
-sudo cp ~/.config/monitors.xml /var/lib/gdm3/.config/monitors.xml
-sudo chown Debian-gdm:Debian-gdm /var/lib/gdm3/.config/monitors.xml
+gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'interactive'   # or 'nothing'
 ```
+
+A long hold is a different path and needs no setting: the key is wired to the AXP228's PWRON pin, and the PMIC cuts all rails itself after the hold time in its register 0x36 (`sudo i2cget -f -y 9 0x34 0x36`; 0x59 here, bit 3 enabled, 6 seconds). That works with the SoC frozen, because the SoC is not involved, and the AXP keeps its registers, unlike a battery pull. It is a hard cut for the filesystem, so it is the way out of a hang, not a way to shut down.
 
 At 1280×720 on five inches GNOME is usable at 100 %; Large Text under Accessibility is the middle ground. The brightness slider and idle dimming work through `/sys/class/backlight` with this fork's [OCP8178 driver](../README.md#backlight-dimming). If the login screen greets you by the wrong name after a user rename, that is the full-name field in `/etc/passwd`, not the login: `sudo chfn -f "Name" user`.
 

@@ -2,7 +2,7 @@
 """Bit-bang SPI probe for the AIO v2 SX1262 on the Radxa CM5, independent of SPI4/spidev.
 
 This is the test that established why LoRa cannot work on a Radxa CM5: MISO
-(Pi GPIO19, header pin 35) is not connected on the module, so the chip's
+(AIO edge finger 20, Connector 1 position 26) is not connected on the module, so the chip's
 GetStatus reply never arrives and MISO follows whatever bias you apply.
 Kept as a diagnostic; see docs/aio-v2.md for the result and the options.
 

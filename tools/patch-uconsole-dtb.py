@@ -9,8 +9,8 @@ earlier (for example to add the battery values to an existing GPS DTB).
 Steps:
   1. UART2 on GPIO0_B5/B6 (uart2m0) for the AIO GPS                  -> /dev/ttyS2
   2. SPI4 left (or put back to) disabled. Earlier versions of this script enabled it
-     with a spidev child for the AIO's LoRa SX1262. LoRa does not work on a Radxa CM5
-     (as far as traced, MISO has no path; see docs/aio-v2.md), and with ClockworkPi's
+     with a spidev child for the AIO's LoRa SX1262. LoRa does not work on a Radxa CM5 as
+     delivered (MISO ends on an unconnected module position; see docs/aio-v2.md), and with ClockworkPi's
      4G board in the slot those lines carry the modem's PCM interface, so an enabled
      SPI4 would drive against the modem. A DTB patched by an old version gets SPI4
      disabled again.

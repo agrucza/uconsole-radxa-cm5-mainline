@@ -1,6 +1,6 @@
 # HackerGadgets AIO v2 on the Radxa CM5
 
-The [HackerGadgets AIO v2](https://hackergadgets.com) is an expansion board for the uConsole's Mini-PCIe slot that bundles an RTL-SDR, a LoRa SX1262, a GPS receiver, a PCF85063A RTC, a USB hub and an RJ45 jack. It is designed for the Raspberry Pi CM4 pinout. On a Radxa CM5 **five of the six functions work**. LoRa is not available right now and probably will not work: as far as the routing can be traced, its MISO line arrives at the one module position the CM5 leaves unconnected. The AIO-side pins have not been measured yet. The RTC was long believed blocked too; that was a misreading of the slot's routing, and since 2026-09-20 it runs on I2C7. HackerGadgets has announced a Radxa CM5 variant of the board.
+The [HackerGadgets AIO v2](https://hackergadgets.com) is an expansion board for the uConsole's Mini-PCIe slot that bundles an RTL-SDR, a LoRa SX1262, a GPS receiver, a PCF85063A RTC, a USB hub and an RJ45 jack. It is designed for the Raspberry Pi CM4 pinout. On a Radxa CM5 **all six functions work, LoRa with one wire on the AIO**: as delivered its MISO line arrives at the one module position the Radxa CM5 leaves unconnected, documented by HackerGadgets' own schematics and measured on every board in between; a wire from the module's MISO pad to the AIO's free test pad TP2 gives it a path, and meshtasticd runs on it since 2026-09-23. The RTC was long believed blocked too; that was a misreading of the slot's routing, and since 2026-09-20 it runs on I2C7. HackerGadgets has announced a Radxa CM5 variant of the board.
 
 Everything below was verified on Debian 13 with a mainline 7.2.6 kernel built from this repo (see [debian.md](debian.md)).
 
@@ -11,7 +11,7 @@ Everything below was verified on Debian 13 with a mainline 7.2.6 kernel built fr
 | RTL-SDR | USB | USB (AIO hub) | ✅ works |
 | USB hub, RJ45 | USB3, RGMII | `usb_host2` via adapter, native GMAC | ✅ works |
 | RTC PCF85063A | the slot's I²C = CM4 SDA0/SCL0 | GPIO3_D3/D2 = **I2C7 m2** → `/dev/rtc0` | ✅ works |
-| LoRa SX1262 | SPI1 (BCM19/20/21, CE0 BCM18) + IRQ 26, Busy 24, Reset 25 | CLK, MOSI, CS reach GPIO1_A2/A1/A3; **MISO arrives at Connector 1 position 26, NC on the CM5**; SPI4 is left disabled | ❌ not available, probably no path; AIO pins still to be measured |
+| LoRa SX1262 | SPI1 (BCM19/20/21, CE0 BCM18) + IRQ 26, Busy 24, Reset 25 | CLK, MOSI, CS reach GPIO1_A2/A1/A3; **MISO ends on Connector 1 position 26, NC on the CM5** (schematics + measured); SPI4 is left disabled | ✅ with the TP2 wire and the aio-lora DTB (software SPI, `/dev/spidev5.0`); meshtasticd initialises the chip; over-the-air traffic not yet confirmed |
 
 The full pin translation, and how the mPCIe slot's lines really travel from the AIO to the module, is in [gpio-map.md](gpio-map.md#expansion-slot-mpcie-routing).
 
@@ -70,6 +70,7 @@ The receiver sits on the Pi UART0 pins, which on the CM5 are UART2 in its `m0` p
 
 3. A first fix takes one to two minutes. `gpsmon` or `cgps` shows it.
 4. `chrony` with `refclock SHM 0 refid GPS` in `/etc/chrony/chrony.conf` picks the fix up from gpsd and, with `rtcsync`, keeps the AIO's RTC trimmed; NTP covers the rest.
+5. The receiver's **PPS** output is on the AIO's `GPIO_6` line, mPCIe finger 38 in HackerGadgets' drawing, which arrives at GPIO4_A2 on the CM5. A `pps-gpio` node on it would give chrony a pulse-per-second reference. Not tried yet.
 
 ---
 
@@ -132,29 +133,40 @@ An early attempt on I2C7 had been dismissed as a wrong turn. It was the right bu
 
 ---
 
-## LoRa: not available, probably no path
+## LoRa: no MISO path as delivered
 
-Not working right now, and probably not fixable without a wire: everything traced so far says the SX1262's MISO line does not reach the SoC with this AIO, this adapter and this module. The picture rests on three stages with three different kinds of evidence, and it is worth keeping them apart:
+The SX1262 hears the SoC and cannot answer. Three of its four SPI lines arrive at the Radxa CM5; the fourth, MISO, ends on a module position the CM5 does not connect. That is why every read over SPI returned `0xFF`. The path is now known from the vendors' own drawings and measured at every stage:
 
-| Stage | Claim | Basis |
+| Stage | MISO is on | Source |
 |---|---|---|
-| AIO board | MISO leaves the AIO on mPCIe pin 20 | forced, not measured: on a Raspberry Pi SPI1's MISO exists only on BCM19, the AIO runs Meshtastic on `spidev1.0` there, and ClockworkPi's CM4 adapter puts BCM19 on mainboard net `GPIO29` = mPCIe pin 20 |
-| mainboard + HackerGadgets adapter | mPCIe pin 20 arrives at Connector 1 position 26, nowhere else | **measured** 2026-09-20, continuity |
-| Radxa CM5 | position 26 connects to nothing | documented by Radxa in two places, the pinout spreadsheet (`radxa_cm5_v2200_pinout.xlsx`, from Radxa's documentation: "Raspberry Pi CM4: GPIO19, Radxa CM5: NC") and the `gpio-line-names` in their DTS, where it is the only header position without a label; consistent with every observation |
+| AIO v2 | HT-RA62 pad 13 → edge finger 20, labelled `SPI1_MISO` | HackerGadgets' AIO drawing; measured 2026-09-22, pad 13 to finger 20 and nothing else |
+| uConsole mainboard | finger 20 = net `GPIO29`, SO-DIMM pin 30 | ClockworkPi's mainboard schematic |
+| HackerGadgets adapter | `DDR_GPIO29` → Connector 1 position 26 (the Pi's GPIO19 position) | HackerGadgets' adapter drawing; measured 2026-09-20, mPCIe 20 to position 26 |
+| Radxa CM5 | position 26: **NC** | Radxa's pinout spreadsheet and their `gpio-line-names`; a scan of every free SoC GPIO while clocking the chip found no line following it ([`tools/lora-miso-scan.py`](../tools/lora-miso-scan.py), 2026-09-20) |
 
-Consistent with that, `GetStatus` (0xC0) over `/dev/spidev4.0` (SPI4 was enabled in the DTS at the time; it no longer is) returned a constant `0xff`, and [`tools/sx1262-bitbang.py`](../tools/sx1262-bitbang.py) shows the SoC-side SPI4 `m2` MISO, GPIO1_A0, following whatever bias it is given. CLK, MOSI, CS, IRQ, Busy and Reset all arrive; only the return path is missing.
+The other six module lines land exactly where the drawing says: MOSI 22, SCK 24, NSS 18, BUSY 30, DIO1 34, RST 32, all measured on the AIO on 2026-09-22.
 
-What is still open is the AIO board itself: continuity from the SX1262 module's MISO pad to mPCIe finger 20, to be measured once the AIO can come out of the running unit. Until then this stays "probably".
+### The one-wire fix
 
-Done already, on the module, in software: [`tools/lora-miso-scan.py`](../tools/lora-miso-scan.py). With the LoRa rail on it bit-bangs GetStatus so the SX1262 drives its status byte onto MISO, and at every clock edge samples every GPIO line that is free in the pinmux table and unused by the kernel, on all five SoC banks. A line that reproduces the same non-constant pattern on every repeat while CS is low, and not while CS is high, is MISO arriving somewhere Radxa did not document. Peripheral-owned pins are never touched, so it is safe on the running system. Run on 2026-09-20: 89 free lines on all five banks, the chip alive (BUSY released after reset), no line followed the clock.
+HackerGadgets' drawing shows edge finger 44, the Pi's GPIO17 position, going to a single test pad on the AIO, **TP2**, and nothing else. That line does reach the Radxa CM5: finger 44 is mainboard net `GPIO41`, SO-DIMM pin 72, the adapter's `DDR_GPIO41`, Connector 1 position 50, **GPIO1_C2**. A short wire on the AIO from the HT-RA62's pad 13 to TP2 therefore gives MISO a path.
 
-Options to make it work, none tried here:
+**The wire, done 2026-09-23.** TP2 was located by continuity from finger 44 and checked before soldering: it beeped to finger 44 and to no other finger, and was open to ground, 3.3 V and every module pad. After the wire from pad 13, finger 44 beeps to pad 13 and to finger 20 (the board's own MISO trace, left in place as a stub to the dead position) and to nothing else. Thin wire, one joint on the module's castellation, one on the pad.
 
-- Wait for HackerGadgets' announced Radxa CM5 variant of the AIO, or ask them.
-- A bodge wire from the SX1262 module's MISO pad to a slot line that does reach the CM5, plus `spi-gpio` in the DTS. Which slot line, to be established by measurement first.
-- A USB LoRa node.
+**The bus.** GPIO1_C2 has no hardware SPI MISO function, so the bus is driven in software by the kernel's `spi-gpio` driver. [`kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts`](../kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts) includes the AIO DTS and adds it: clock GPIO1_A2, MOSI GPIO1_A1, chip select GPIO1_A3 active low, MISO GPIO1_C2, a `spi5` alias so the device is always `/dev/spidev5.0`, and a spidev child. IRQ, Busy and Reset stay unclaimed for meshtasticd. It needs `CONFIG_SPI_GPIO=y` and spidev, both in the build script's fragment now, so the first build with it is a full kernel build, not `DTBS_ONLY`. Boot this DTB only with the modified AIO in the slot: the three driven lines are the ones ClockworkPi's 4G board uses for its modem's PCM interface (see [Other boards in the slot](#other-boards-in-the-slot)).
 
-The meshtasticd configuration that would be correct once the chip is reachable is kept for reference: [`runtime/aio-v2/meshtasticd-aio-v2-lora.yaml`](../runtime/aio-v2/meshtasticd-aio-v2-lora.yaml) (spidev4.0, IRQ gpiochip3/24, Busy 1/6, Reset 1/8) and the rail drop-in [`runtime/aio-v2/meshtasticd-lora-power.conf`](../runtime/aio-v2/meshtasticd-lora-power.conf). Note that the Debian 12 meshtasticd package segfaults on this kernel (built against libgpiod 1, and the kernel has no `CONFIG_GPIO_CDEV_V1`); the Debian 13 package runs.
+**Status, 2026-09-23.** Booted with the aio-lora DTB, the chip answers through `/dev/spidev5.0`: `GetStatus` returns `0x2A` (standby), the LoRa sync word register 0x0740 reads its power-on value `0x14`, and the version string is `SX1261 V2D 2D02`, which is what SX1262 silicon reports. meshtasticd 2.7.26 logs `SX126x init result 0` and re-initialises cleanly after a region change. No second node was in range yet, so over-the-air traffic is the one thing still unconfirmed.
+
+Three things cost an evening and are worth knowing:
+
+- **Do not pulse the chip's reset pin.** After a low pulse on NRESET (GPIO1_B0) this chip's Busy and MISO lines floated and every SPI read returned zeros until the LoRa rail had been switched off and on again. The cause is not established; a supply on the AIO that cannot carry the post-reset start-up surge is the guess. Consequences: the meshtasticd config leaves the `Reset` entry out, so RadioLib skips its hardware reset, and the service drop-in power-cycles the rail before every start instead. Software probes should do the same.
+- **The daemon needs the `spidev` group.** meshtasticd runs as its own user; `/dev/spidev5.0` is `root:spidev`, and the package's rules do not cover a bus it did not expect. `SupplementaryGroups=spidev` in the drop-in fixes it (the symptom is `Failed to open posix file /dev/spidev5.0, errno=13` followed by "No hardware spi chip found").
+- **It also needs a MAC address** to derive its node ID: `General: MACAddressSource: <interface>` in the YAML, with the name of the CM5's Ethernet interface (`ip -br link`), otherwise it exits with "Blank MAC Address not allowed".
+
+`spi-gpio` ignores the requested clock rate on this kernel and runs the bus at about 1.1 Mbit/s, well within the SX1262's limit. After the region is set (`meshtastic --host localhost --set lora.region EU_868`), the log should show `Set radio: region=EU_868` and a fresh `init result 0`.
+
+The meshtasticd configuration [`runtime/aio-v2/meshtasticd-aio-v2-lora.yaml`](../runtime/aio-v2/meshtasticd-aio-v2-lora.yaml) names that device (IRQ gpiochip3/24, Busy 1/6, Reset 1/8), with the rail drop-in [`runtime/aio-v2/meshtasticd-lora-power.conf`](../runtime/aio-v2/meshtasticd-lora-power.conf). Note that the Debian 12 meshtasticd package segfaults on this kernel (built against libgpiod 1, and the kernel has no `CONFIG_GPIO_CDEV_V1`); the Debian 13 package runs.
+
+Without the wire, the ways out are HackerGadgets' announced Radxa CM5 variant of the AIO, or a USB LoRa node.
 
 ---
 
@@ -212,17 +224,17 @@ The AIO v2 is not the only thing that goes into the mPCIe slot, and the slot's l
 - **SPI4 stays disabled in the AIO DTS.** On the 4G board the lines the AIO uses for LoRa SPI are the modem's PCM audio interface, and the modem drives the PCM clock and data-out itself. An enabled SPI4 would hold its clock and chip select against those outputs. Since LoRa has no path on the CM5 anyway, the AIO DTS does not enable SPI4, and [`tools/patch-uconsole-dtb.py`](../tools/patch-uconsole-dtb.py) disables it again in a DTB patched by an older version.
 - **`aio-rails.service` runs only with the AIO present.** `aio usb on` drives the line that, on the 4G board, is the modem's STATUS output. The unit therefore carries `ConditionPathExists=/sys/bus/i2c/devices/7-0051`: the AIO's RTC on I2C7 is the one thing in that slot no other board has. With any other board the unit is skipped. The gpsd drop-in only acts when gpsd runs, which nobody enables without the AIO.
 
-What is known about the boards in this collection, from the makers' pages and the schematics; "expected" means not tried here:
+What is known about the boards in this collection, from the makers' pages and schematics (HackerGadgets' schematics of the AIO v2 edge connector and of the CM4/Radxa-CM5 adapter (rev v1.2), shared by vileer on the ClockworkPi forum on 2026-09-23; ClockworkPi's 4G board schematic); "expected" means not tried here:
 
 | Board | Slot lines it uses | With the AIO DTS on the CM5 |
 |---|---|---|
-| HackerGadgets AIO v2 | USB pair, UART (GPS, PPS on the BCM6 line), the slot I²C (RTC), the LoRa lines, four rail enables; Ethernet and USB 3.0 via the adapter | GPS, SDR, RTC, hub, RJ45 work; LoRa no path |
+| HackerGadgets AIO v2 | per its drawing: 5 V on 2–10; USB pairs on 7/9 (SDR) and 13/15 (hub); Ethernet pairs and LEDs on the odd CSI positions; GPS UART 26/28, PPS 38; LoRa 18/20/22/24 + Busy 30, Reset 32, IRQ 34; rails 36/40/42/48; RTC I²C 50/52; finger 44 is a free test pad, 46 `Camera_GPIO` | all work; LoRa with the TP2 wire and the aio-lora DTB |
 | HackerGadgets AIO v1 | same, but the rails are always on per HackerGadgets' guide; USB 2.0 hub, no RJ45 | expected: as v2 without the rail switching |
 | HackerGadgets RJ45 / USB 3.0 board | Ethernet via the adapter's CSI routing, USB 3.0 via the adapter's connector, USB 2.0 pair; its 17-pin GPIO header is the slot's lines brought out | works |
 | uCon USB expansion 3+1+1 (uHub design) | USB 2.0 pair only | expected to just work |
 | ClockworkPi 4G EXT | UART, PCM, the slot I²C, modem NETLIGHT and STATUS outputs on two slot lines, power key and reset on others | UART2 from the AIO DTS is what the modem needs; untested here |
 
-HackerGadgets' setup guide also names the AIO's GPS PPS output, BCM6 in Pi numbering, which reaches GPIO4_A2 on the CM5. A `pps-gpio` node there would give chrony a pulse-per-second reference; not tried yet.
+**The adapter's fan header**, from the same drawing: the header's PWM goes to the Radxa module's third connector, pin 18, and its tacho to pin 38. On the Radxa CM5 those are GPIO3_D5, which carries hardware **PWM11** in its `m3` pinmux, and GPIO4_A4. A `pwm-fan` node on `pwm11` with a thermal cooling map is therefore possible for a Pi 5 style fan on that header; not built yet.
 
 ---
 

@@ -1,0 +1,9 @@
+# /etc/systemd/system/battery-log.service
+# Triggered by battery-log.timer; see runtime/battery/battery-log.
+
+[Unit]
+Description=Append the battery state to /var/log/battery.csv
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/battery-log

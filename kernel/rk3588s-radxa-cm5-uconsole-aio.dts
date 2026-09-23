@@ -10,12 +10,13 @@
  * applied to the base DTB, but from source. See docs/aio-v2.md.
  *
  *  - UART2 (uart2m0, GPIO0_B5/B6 = CM4 socket pins 8/10) for the AIO GPS -> /dev/ttyS2
- *  - SPI4 is deliberately NOT enabled. The AIO's LoRa SX1262 would sit on
- *    those lines, but as far as the routing has been traced its MISO arrives
- *    at a module position the Radxa CM5 leaves unconnected (not fully
- *    measured yet, see docs/aio-v2.md), and with ClockworkPi's 4G board in
- *    the slot the same lines carry the modem's PCM interface: an enabled SPI4
- *    would drive its clock and chip select against the modem's outputs.
+ *  - SPI4 is deliberately NOT enabled. The AIO's LoRa SX1262 sits on those
+ *    lines, but its MISO ends on a module position the Radxa CM5 leaves
+ *    unconnected (HackerGadgets' schematics, measured; docs/aio-v2.md), and
+ *    with ClockworkPi's 4G board in the slot the same lines carry the modem's
+ *    PCM interface: an enabled SPI4 would drive its clock and chip select
+ *    against the modem's outputs. A one-wire fix (MISO to the AIO's TP2 ->
+ *    GPIO1_C2) would use an spi-gpio node instead, see docs/aio-v2.md.
  *  - UART4 serial console disabled and GPIO1_B3 hogged low: that pin is PA_EN,
  *    the AW8110 amplifier enable, on the uConsole mainboard. With the console
  *    driving it the amplifier hisses on battery. Boot entries for this DTB must

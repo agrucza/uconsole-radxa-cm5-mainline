@@ -499,7 +499,7 @@ Radxa's Debian image on the eMMC, upgraded to Debian 13; the full setup is in [d
 
 ### meshtasticd segfaults at start
 
-**Cause:** the Debian 12 `meshtasticd` package is built against libgpiod 1 and this kernel has no `CONFIG_GPIO_CDEV_V1`. The Debian 13 package uses libgpiod 2 and runs. (It still finds no LoRa chip on a Radxa CM5, for hardware reasons; see [aio-v2.md](aio-v2.md#lora-not-available-probably-no-path).) Rebuilding the kernel with `CONFIG_GPIO_CDEV_V1=y` is the alternative if you must keep Bookworm-era gpiod tools.
+**Cause:** the Debian 12 `meshtasticd` package is built against libgpiod 1 and this kernel has no `CONFIG_GPIO_CDEV_V1`. The Debian 13 package uses libgpiod 2 and runs. (It still finds no LoRa chip on a Radxa CM5, for hardware reasons; see [aio-v2.md](aio-v2.md#lora-no-miso-path-as-delivered).) Rebuilding the kernel with `CONFIG_GPIO_CDEV_V1=y` is the alternative if you must keep Bookworm-era gpiod tools.
 
 ### Radxa stock kernel: lsusb prints nothing
 

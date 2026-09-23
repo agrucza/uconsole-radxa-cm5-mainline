@@ -11,9 +11,10 @@
 #   FORCE_DEFCONFIG=1 ./build-uconsole-kernel.sh    # discard existing .config
 #   DTBS_ONLY=1 ./build-uconsole-kernel.sh          # only `make dtbs` (seconds), for DTS edits
 #
-# Device trees built: rk3588s-radxa-cm5-uconsole.dtb (base) and, if its source
-# is present in the tree, rk3588s-radxa-cm5-uconsole-aio.dtb (HackerGadgets
-# AIO v2 variant, see docs/aio-v2.md).
+# Device trees built: rk3588s-radxa-cm5-uconsole.dtb (base) and, if their sources
+# are present in the tree, rk3588s-radxa-cm5-uconsole-aio.dtb (HackerGadgets
+# AIO v2 variant) and rk3588s-radxa-cm5-uconsole-aio-lora.dtb (the same with a
+# software SPI bus for an AIO carrying the LoRa MISO wire), see docs/aio-v2.md.
 set -euo pipefail
 
 # Single knob for version bumps — everything else derives from it.
@@ -81,6 +82,9 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=y
 # OCP8178 one-wire dimming (kernel/ocp8178_bl.c); the AIO DTS requires it
 CONFIG_BACKLIGHT_OCP8178=y
+# ---- SPI: bit-banged bus for the AIO v2 LoRa wire (aio-lora DTS), spidev for meshtasticd ----
+CONFIG_SPI_GPIO=y
+CONFIG_SPI_SPIDEV=m
 # ---- Serial console (UART4 m2 @ 1.5 Mbps) ----
 CONFIG_SERIAL_8250=y
 CONFIG_SERIAL_8250_CONSOLE=y
@@ -139,6 +143,11 @@ if [ -f "$DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dts" ]; then
 	[ -n "$HAVE_OCP8178" ] || { echo "the AIO DTS uses the OCP8178 backlight: add drivers/video/backlight/ocp8178_bl.c (README step 2)"; exit 1; }
 	DTBS="$DTBS $DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dtb"
 	echo "   AIO v2 DTS present, will be built too."
+	if [ -f "$DTB_DIR/rk3588s-radxa-cm5-uconsole-aio-lora.dts" ]; then
+		grep -q uconsole-aio-lora "$DTB_DIR/Makefile" || { echo "MISSING dtb Makefile entry for uconsole-aio-lora"; exit 1; }
+		DTBS="$DTBS $DTB_DIR/rk3588s-radxa-cm5-uconsole-aio-lora.dtb"
+		echo "   AIO v2 LoRa-wire DTS present, will be built too."
+	fi
 else
 	echo "   (no rk3588s-radxa-cm5-uconsole-aio.dts in the tree: base DTB only)"
 fi
@@ -183,6 +192,9 @@ grep -q "^CONFIG_NETCONSOLE=m" .config || { echo "FAILED: NETCONSOLE not =m"; ex
 if [ -n "$HAVE_OCP8178" ]; then
 	grep -q "^CONFIG_BACKLIGHT_OCP8178=y" .config || { echo "FAILED: BACKLIGHT_OCP8178 not =y"; exit 1; }
 fi
+# The aio-lora DTS needs both; without them the bus and /dev/spidev5.0 never appear.
+grep -q "^CONFIG_SPI_GPIO=y" .config   || { echo "FAILED: SPI_GPIO not =y"; exit 1; }
+grep -q "^CONFIG_SPI_SPIDEV=[ym]" .config || { echo "FAILED: SPI_SPIDEV not set"; exit 1; }
 echo "   all good."
 
 echo "== Build =="

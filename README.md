@@ -6,7 +6,7 @@ No BSP tree, no vendor kernel. Just mainline plus one panel driver and one devic
 
 Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — same driver, same device tree, same two Kconfig/Makefile lines. The examples below use 7.1; substitute the version you want, or set `KVER` for the build script.
 
-> **About this fork.** Everything upstream describes still applies. On top of it, this fork documents a second, independently brought-up setup: an **original-panel** uConsole, **Debian 13 on the eMMC**, the **HackerGadgets AIO v2** (GPS, SDR and RTC working, LoRa not available), a **10 Ah single-cell battery** with the AXP228 tuned for it, and the small tools that came out of it. Start at [Fork additions](#fork-additions).
+> **About this fork.** Everything upstream describes still applies. On top of it, this fork documents a second, independently brought-up setup: an **original-panel** uConsole, **Debian 13 on the eMMC**, the **HackerGadgets AIO v2** (all of it working, LoRa with one wire on the AIO), a **10 Ah single-cell battery** with the AXP228 tuned for it, and the small tools that came out of it. Start at [Fork additions](#fork-additions).
 
 ![Google in Chromium on uConsole](docs/screenshot.jpg)
 
@@ -34,7 +34,7 @@ Developed on `v7.1`, then rebuilt unchanged on `v7.2` from a clean checkout — 
 | Audio | ❌ not addressed here (no analog DAC on Radxa CM5); the AIO DTB at least silences the amplifier hiss |
 | HackerGadgets AIO v2: GPS, RTL-SDR, USB hub, RJ45 | ✅ works with the AIO DTB — [docs/aio-v2.md](docs/aio-v2.md) |
 | HackerGadgets AIO v2: RTC | ✅ works on I2C7, the slot's real I²C bus — [docs/aio-v2.md](docs/aio-v2.md#rtc-works-on-i2c7) |
-| HackerGadgets AIO v2: LoRa | ❌ not available, probably no path: MISO arrives at a module position Radxa leaves unconnected; AIO pins still to be measured — [docs/aio-v2.md](docs/aio-v2.md#lora-not-available-probably-no-path) |
+| HackerGadgets AIO v2: LoRa | ✅ with one wire on the AIO (MISO pad to test pad TP2) and the `aio-lora` DTB: as delivered MISO ends on a module position the Radxa CM5 leaves unconnected; meshtasticd runs, over-the-air traffic not yet confirmed — [docs/aio-v2.md](docs/aio-v2.md#lora-no-miso-path-as-delivered) |
 
 **Known workaround required:** the first DSI enable at boot wedges the controller (see [Troubleshooting](docs/troubleshooting.md)). A one-shot systemd service cycles the display at boot and fixes it. This looks like a genuine mainline `dw-mipi-dsi2` bug, not something specific to this board.
 
@@ -135,6 +135,13 @@ sed -i '/rk3588s-radxa-cm5-io.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa
 cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-aio.dts \
    arch/arm64/boot/dts/rockchip/
 sed -i '/rk3588s-radxa-cm5-uconsole.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole-aio.dtb' \
+  arch/arm64/boot/dts/rockchip/Makefile
+
+# Optional, only for an AIO v2 with the LoRa MISO wire (docs/aio-v2.md, "The one-wire fix"):
+# the AIO variant plus a bit-banged SPI bus for the SX1262 -> /dev/spidev5.0
+cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts \
+   arch/arm64/boot/dts/rockchip/
+sed -i '/rk3588s-radxa-cm5-uconsole-aio.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole-aio-lora.dtb' \
   arch/arm64/boot/dts/rockchip/Makefile
 
 # Battery status fix: report "Full" once the AXP has terminated instead of
@@ -248,8 +255,8 @@ Each of these is self-contained and optional. The files live under `runtime/` an
 
 | Topic | Read | Files |
 |---|---|---|
-| HackerGadgets AIO v2 on the CM5: rails, GPS, SDR, RTC, why LoRa is not available, the AIO device tree | [docs/aio-v2.md](docs/aio-v2.md) | [`runtime/aio-v2/`](runtime/aio-v2/), [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py), [`tools/sx1262-bitbang.py`](tools/sx1262-bitbang.py) |
-| Battery: the supply-sag trap, charger requirements, AXP228 cutoff and fuel-gauge capacity, clean low-battery poweroff | [docs/battery.md](docs/battery.md) | [`runtime/battery/`](runtime/battery/) |
+| HackerGadgets AIO v2 on the CM5: rails, GPS, SDR, RTC, LoRa with the TP2 wire, the AIO device trees | [docs/aio-v2.md](docs/aio-v2.md) | [`runtime/aio-v2/`](runtime/aio-v2/), [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py), [`tools/sx1262-bitbang.py`](tools/sx1262-bitbang.py) |
+| Battery: the supply-sag trap, charger requirements, AXP228 cutoff and fuel-gauge capacity, clean low-battery poweroff, permanent battery log | [docs/battery.md](docs/battery.md) | [`runtime/battery/`](runtime/battery/) |
 | Debian 13 on the eMMC: flashing, rescue SD, boot entries that survive `apt`, Trixie upgrade | [docs/debian.md](docs/debian.md) | [`runtime/debian/`](runtime/debian/) |
 | Backlight dimming: OCP8178 one-wire driver, 32 levels | [below](#backlight-dimming) | [`kernel/ocp8178_bl.c`](kernel/ocp8178_bl.c) |
 | Every header pin with its mainboard net and CM5 alternate functions, and how the mPCIe slot is really routed | [docs/gpio-map.md](docs/gpio-map.md) | – |
@@ -269,6 +276,11 @@ sudo systemctl enable --now axp-battery-config.service
 sudo install -m 755 runtime/battery/battery-guard /usr/local/bin/
 sudo cp runtime/battery/battery-guard.{service,timer} /etc/systemd/system/
 sudo systemctl enable --now battery-guard.timer
+# Battery: one CSV line a minute, so a charge or discharge can be measured after the fact
+sudo install -m 755 runtime/battery/battery-log /usr/local/bin/
+sudo cp runtime/battery/battery-log.{service,timer} runtime/battery/battery-log-shutdown.service /etc/systemd/system/
+sudo cp runtime/battery/battery-log.logrotate /etc/logrotate.d/battery-log
+sudo systemctl enable --now battery-log.timer battery-log-shutdown.service
 
 # Debian only: keep the mainline boot entry across apt runs
 sudo cp /boot/extlinux/extlinux.conf /root/extlinux.conf.mainline
@@ -299,7 +311,7 @@ If a level ever fails to stick, retry with the downstream behaviour before assum
 kernel/    panel driver, OCP8178 backlight driver, AXP battery status patch, device tree (+ AIO v2 variant), build script
 runtime/   system files: display kick, shutdown hook, watchdog, labwc autostart, extlinux example
   aio-v2/  rail switch `aio`, its boot unit, gpsd drop-in, meshtasticd reference config
-  battery/ AXP228 settings unit, low-battery guard + timer
+  battery/ AXP228 settings unit, low-battery guard + timer, minute-by-minute battery log + timer
   debian/  apt hook that restores the mainline boot entry
 tools/     patch-uconsole-dtb.py (AIO nodes into a built DTB), sx1262-bitbang.py and lora-miso-scan.py (LoRa MISO probes)
 docs/      gpio-map, troubleshooting, aio-v2, battery, debian, kernel-guide
@@ -321,7 +333,7 @@ Beyond the stock `rk3588s-radxa-cm5.dtsi`:
 
 Full pin mapping in [`docs/gpio-map.md`](docs/gpio-map.md).
 
-The fork adds [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio.dts), which includes the base file and enables UART2 for the AIO v2 GPS, I2C7 with the AIO's RTC, disables the UART4 console in favour of holding the amplifier enable low, and carries the 10 Ah battery labels. It builds alongside the base DTB; `DTBS_ONLY=1` in the build script rebuilds just the device trees. [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py) produces the same tree from a prebuilt DTB without a kernel tree.
+The fork adds [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio.dts), which includes the base file and enables UART2 for the AIO v2 GPS, I2C7 with the AIO's RTC, disables the UART4 console in favour of holding the amplifier enable low, and carries the 10 Ah battery labels. It builds alongside the base DTB; `DTBS_ONLY=1` in the build script rebuilds just the device trees. A third file, [`kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts), includes the AIO variant and adds a software SPI bus for an AIO whose LoRa MISO has been wired to its TP2 pad ([docs/aio-v2.md](docs/aio-v2.md#the-one-wire-fix)); it needs `CONFIG_SPI_GPIO`, which the build script's fragment now sets. [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py) produces the same tree from a prebuilt DTB without a kernel tree.
 
 ---
 
@@ -350,7 +362,7 @@ The things that cost the most time during bring-up — inverted panel detection,
 Useful things to report:
 
 - **Original (pre-2025) panel:** confirmed working on one unit (see Status); more reports still welcome. `dmesg | grep cwu50`
-- **AIO v2 LoRa on a CM5 with a bodge wire**, or news of HackerGadgets' Radxa variant
+- **AIO v2 LoRa over the air**: a second node in range of a uConsole with the TP2 wire ([docs/aio-v2.md](docs/aio-v2.md#the-one-wire-fix)), transmit behaviour, and why the chip needs a rail cycle after a reset pulse
 - **Other adapters / no NVMe board:** what needed changing in the DTS
 - **HDMI hotplug**, **backlight dimming**, **charge LED** — all open
 
