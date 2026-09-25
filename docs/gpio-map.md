@@ -138,7 +138,7 @@ Sources for the table: HackerGadgets' schematics of the AIO v2 edge connector an
 
 The remaining fingers carry no GPIO: 5 V on the even fingers 2 to 10 (they beep to each other, handy for orientation), the two USB 2.0 pairs on 7/9 (SDR) and 13/15 (hub), 3.3 V, ground and the speaker lines, and on the CSI positions 23 to 49 the Ethernet LEDs and pairs the adapter routes there for the RJ45.
 
-**The adapter's fan header** is on the Radxa module's third connector: PWM on pin 18 = GPIO3_D5, hardware PWM11 in its `m3` pinmux; tacho on pin 38 = GPIO4_A4. Both from HackerGadgets' drawing and Radxa's sheet, not measured.
+**The adapter's fan header** is on the Radxa module's third connector: PWM on pin 18 = GPIO3_D5, hardware PWM11 in its `m3` pinmux; tacho on pin 38 = GPIO4_A4, open-drain, pull-up needed. From HackerGadgets' drawing and Radxa's sheet, measured 2026-09-25 with a Raspberry Pi fan (fan follows GPIO3_D5; tacho pulses on GPIO4_A4). Device tree: [`kernel/rk3588s-radxa-cm5-uconsole-hg-fan.dtsi`](../kernel/rk3588s-radxa-cm5-uconsole-hg-fan.dtsi).
 
 ### Measuring it yourself
 

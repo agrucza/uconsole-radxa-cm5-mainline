@@ -162,7 +162,7 @@ awk -F, '$1>="2026-09-24T08:00" && $1<="2026-09-24T14:00" && $5<0 {s+=-$5; n++} 
 awk -F, 'NR>1 && prev!="" && $2!=prev {print $1, prev" -> "$2, $4/1e6" V"} {prev=$2}' /var/log/battery.csv
 ```
 
-One line a minute is about 30 MB a year; logrotate keeps monthly, compressed files for two years. The log is separate from the guard on purpose: the guard is safety code and stays small, and a logging failure must never touch it.
+The recipes count one minute per line, so the lines must really be a minute apart: the timer fires on the wall-clock minute for that reason, and the first two timestamps of any window show whether it did. (An earlier version of the timer used a relative interval and drifted to 65 s per line, which made the sum 7 % low.) One line a minute is about 30 MB a year; logrotate keeps monthly, compressed files for two years. The log is separate from the guard on purpose: the guard is safety code and stays small, and a logging failure must never touch it.
 
 ## Intermittent `-6` reads
 

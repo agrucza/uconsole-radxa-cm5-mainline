@@ -13,8 +13,9 @@
 #
 # Device trees built: rk3588s-radxa-cm5-uconsole.dtb (base) and, if their sources
 # are present in the tree, rk3588s-radxa-cm5-uconsole-aio.dtb (HackerGadgets
-# AIO v2 variant) and rk3588s-radxa-cm5-uconsole-aio-lora.dtb (the same with a
-# software SPI bus for an AIO carrying the LoRa MISO wire), see docs/aio-v2.md.
+# AIO v2 variant; needs the -mainboard, -hg-fan and -battery-10ah includes next
+# to it) and rk3588s-radxa-cm5-uconsole-aio-lora.dtb (the same with a software
+# SPI bus for an AIO carrying the LoRa MISO wire), see docs/aio-v2.md.
 set -euo pipefail
 
 # Single knob for version bumps — everything else derives from it.
@@ -82,6 +83,10 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_GPIO=y
 # OCP8178 one-wire dimming (kernel/ocp8178_bl.c); the AIO DTS requires it
 CONFIG_BACKLIGHT_OCP8178=y
+# ---- Thermal: SoC temperature sensor, built in so the thermal zones (CPU
+# throttling, critical trip, the adapter fan's cooling maps) exist from boot.
+# The uConsole DTSs enable tsadc in the -hg-fan include; defconfig has this =m.
+CONFIG_ROCKCHIP_THERMAL=y
 # ---- SPI: bit-banged bus for the AIO v2 LoRa wire (aio-lora DTS), spidev for meshtasticd ----
 CONFIG_SPI_GPIO=y
 CONFIG_SPI_SPIDEV=m
@@ -140,6 +145,9 @@ if [ -f drivers/video/backlight/ocp8178_bl.c ]; then
 fi
 if [ -f "$DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dts" ]; then
 	grep -q uconsole-aio "$DTB_DIR/Makefile" || { echo "MISSING dtb Makefile entry for uconsole-aio"; exit 1; }
+	for inc in mainboard hg-fan battery-10ah; do
+		test -f "$DTB_DIR/rk3588s-radxa-cm5-uconsole-$inc.dtsi" || { echo "MISSING rk3588s-radxa-cm5-uconsole-$inc.dtsi (included by the AIO DTS; copy it next to it)"; exit 1; }
+	done
 	[ -n "$HAVE_OCP8178" ] || { echo "the AIO DTS uses the OCP8178 backlight: add drivers/video/backlight/ocp8178_bl.c (README step 2)"; exit 1; }
 	DTBS="$DTBS $DTB_DIR/rk3588s-radxa-cm5-uconsole-aio.dtb"
 	echo "   AIO v2 DTS present, will be built too."
@@ -194,6 +202,7 @@ if [ -n "$HAVE_OCP8178" ]; then
 fi
 # The aio-lora DTS needs both; without them the bus and /dev/spidev5.0 never appear.
 grep -q "^CONFIG_SPI_GPIO=y" .config   || { echo "FAILED: SPI_GPIO not =y"; exit 1; }
+grep -q "^CONFIG_ROCKCHIP_THERMAL=y" .config || { echo "FAILED: ROCKCHIP_THERMAL not =y (thermal zones, fan control)"; exit 1; }
 grep -q "^CONFIG_SPI_SPIDEV=[ym]" .config || { echo "FAILED: SPI_SPIDEV not set"; exit 1; }
 echo "   all good."
 

@@ -1,12 +1,17 @@
 # /etc/systemd/system/battery-log.timer
+#
+# Fire on the wall-clock minute, not "one minute after the last run": with a
+# relative interval systemd's scheduling slack adds up (65 s lines were seen
+# with OnUnitActiveSec=1min and AccuracySec=5s), and then one line is no
+# longer one minute and a per-line sum of the current column comes out low.
 
 [Unit]
 Description=Log the battery state once a minute
 
 [Timer]
-OnBootSec=1min
-OnUnitActiveSec=1min
-AccuracySec=5s
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=false
 
 [Install]
 WantedBy=timers.target

@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ClockworkPi uConsole mainboard details that the upstream
+ * rk3588s-radxa-cm5-uconsole.dts does not have yet. Nothing in here depends
+ * on an expansion board or on a particular battery; every uConsole with a
+ * Radxa CM5 can use it. Candidate for the base DTS upstream.
+ *
+ *  - Backlight through the OCP8178 one-wire driver (kernel/ocp8178_bl.c):
+ *    32 brightness levels instead of gpio-backlight's on/off, same GPIO1_B1.
+ *    REQUIRES CONFIG_BACKLIGHT_OCP8178 in the kernel; without the driver the
+ *    panel waits for its backlight forever and the display stays dark.
+ *  - UART4 serial console disabled and GPIO1_B3 hogged low: that pin is
+ *    PA_EN, the AW8110 amplifier enable, on the mainboard. With the console
+ *    driving it the amplifier hisses on battery. Boot entries for a DTB with
+ *    this include must not carry console=ttyS4.
+ */
+
+/ {
+	chosen {
+		/* UART4 is disabled below; no serial console. */
+		/delete-property/ stdout-path;
+	};
+};
+
+/* OCP8178 on GPIO1_B1, same pin as upstream's gpio-backlight, different driver.
+ * Levels 0..31; the panel driver switches it off/on around panel disable/enable. */
+&backlight {
+	compatible = "orientchip,ocp8178";
+	/delete-property/ default-on;
+	default-brightness-level = <31>;
+};
+
+/* PA_EN (Pi GPIO11 / socket pin 23): amplifier enable, held low. */
+&gpio1 {
+	pa-en-hog {
+		gpio-hog;
+		gpios = <RK_PB3 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "PA_EN";
+	};
+};
+
+&uart4 {
+	status = "disabled";
+};

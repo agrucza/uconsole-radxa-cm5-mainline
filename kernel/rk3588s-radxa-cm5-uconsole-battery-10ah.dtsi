@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Battery labels for a single 10 Ah pouch cell in place of the two 18650s the
+ * upstream DTS describes: JS 1260110, 3.7 V / 10 000 mAh / 37 Wh, with its own
+ * protection board (docs/battery.md, "The 10 Ah swap").
+ *
+ * Per machine, not per board: include it only if this is your cell, or copy it
+ * and put your own numbers in. What the properties do:
+ *
+ *  - energy/charge-full-design: labels for userspace (sysfs *_full_design).
+ *    The fuel gauge's own capacity registers are NOT set from here; the
+ *    axp20x driver never writes them. They hold the MEASURED usable capacity
+ *    (7583 mAh for this cell) and are programmed at boot by
+ *    runtime/battery/axp-battery-config.service.
+ *  - voltage-min-design: the axp20x driver programs the AXP's discharge cutoff
+ *    from this at probe (3.2 V; the mainboard browns out at ~3.4 V anyway, so
+ *    runtime/battery/battery-guard powers off at 3.50 V first).
+ */
+
+&battery {
+	energy-full-design-microwatt-hours = <37000000>;
+	charge-full-design-microamp-hours = <10000000>;
+	voltage-min-design-microvolt = <3200000>;
+};

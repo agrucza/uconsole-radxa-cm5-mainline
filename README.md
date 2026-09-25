@@ -130,9 +130,12 @@ cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole.dts \
 sed -i '/rk3588s-radxa-cm5-io.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole.dtb' \
   arch/arm64/boot/dts/rockchip/Makefile
 
-# Optional: the HackerGadgets AIO v2 variant (GPS on ttyS2, RTC, no serial console,
-# 10 Ah battery labels, OCP8178 backlight dimming) — see docs/aio-v2.md
+# Optional: the HackerGadgets AIO v2 variant (GPS on ttyS2, RTC) — see docs/aio-v2.md.
+# It includes three .dtsi files that are useful on their own: -mainboard (OCP8178
+# backlight dimming, amplifier enable held low, no serial console), -hg-fan (the
+# adapter's fan header) and -battery-10ah (labels for this fork's cell; swap or drop).
 cp ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-aio.dts \
+   ../uconsole-radxa-cm5-mainline/kernel/rk3588s-radxa-cm5-uconsole-{mainboard,hg-fan,battery-10ah}.dtsi \
    arch/arm64/boot/dts/rockchip/
 sed -i '/rk3588s-radxa-cm5-uconsole.dtb/a dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3588s-radxa-cm5-uconsole-aio.dtb' \
   arch/arm64/boot/dts/rockchip/Makefile
@@ -292,7 +295,7 @@ sudo systemctl daemon-reload
 
 Upstream drives the OCP8178 backlight chip with `gpio-backlight`, so it is on or off. The chip's EN pin also speaks a one-wire protocol, a shutdown-plus-detect sequence followed by an address byte and a 5-bit level, and ClockworkPi's downstream kernels have used it for years. [`kernel/ocp8178_bl.c`](kernel/ocp8178_bl.c) is a mainline-style driver for that protocol: 32 levels at `/sys/class/backlight/backlight/brightness`, so `brightnessctl`, sway's idle handling and the desktop sliders work. Unlike the downstream driver it enters the one-wire mode only when the chip was off, instead of blanking the panel for 3 ms with interrupts disabled on every change; `always_reenter=1` as a module parameter restores the downstream behaviour if a level ever fails to stick. Entering the mode starts with 3 ms of EN low, which also clears the latched-off state described in [troubleshooting](docs/troubleshooting.md#lcd-completely-dark-backlight-latched-off).
 
-The AIO DTS switches the backlight node to this driver. Build step 2 above copies the driver and adds its Kconfig and Makefile lines; the build script checks that `CONFIG_BACKLIGHT_OCP8178=y` ended up in the config, because a kernel without the driver and a DTB that asks for it leaves the panel waiting for its backlight and the screen dark.
+The mainboard include, and with it both AIO device trees, switches the backlight node to this driver. Build step 2 above copies the driver and adds its Kconfig and Makefile lines; the build script checks that `CONFIG_BACKLIGHT_OCP8178=y` ended up in the config, because a kernel without the driver and a DTB that asks for it leaves the panel waiting for its backlight and the screen dark.
 
 **Status: tested 2026-09-20/21** on the original-panel unit: levels 0 to 31 take effect from sysfs, the panel comes back at the previously set level after being powered off and on again (sway's idle path and GNOME's screen blanking alike), and under GNOME the keyboard's brightness keys and the Settings slider control it, so the enter-once logic holds in daily use. Quick check after building:
 
@@ -308,7 +311,7 @@ If a level ever fails to stick, retry with the downstream behaviour before assum
 ### Repository layout
 
 ```
-kernel/    panel driver, OCP8178 backlight driver, AXP battery status patch, device tree (+ AIO v2 variant), build script
+kernel/    panel driver, OCP8178 backlight driver, AXP battery status patch, device trees (base; mainboard, adapter-fan and battery includes; AIO v2 and AIO+LoRa variants), build script
 runtime/   system files: display kick, shutdown hook, watchdog, labwc autostart, extlinux example
   aio-v2/  rail switch `aio`, its boot unit, gpsd drop-in, meshtasticd reference config
   battery/ AXP228 settings unit, low-battery guard + timer, minute-by-minute battery log + timer
@@ -333,7 +336,13 @@ Beyond the stock `rk3588s-radxa-cm5.dtsi`:
 
 Full pin mapping in [`docs/gpio-map.md`](docs/gpio-map.md).
 
-The fork adds [`kernel/rk3588s-radxa-cm5-uconsole-aio.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio.dts), which includes the base file and enables UART2 for the AIO v2 GPS, I2C7 with the AIO's RTC, disables the UART4 console in favour of holding the amplifier enable low, and carries the 10 Ah battery labels. It builds alongside the base DTB; `DTBS_ONLY=1` in the build script rebuilds just the device trees. A third file, [`kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts), includes the AIO variant and adds a software SPI bus for an AIO whose LoRa MISO has been wired to its TP2 pad ([docs/aio-v2.md](docs/aio-v2.md#the-one-wire-fix)); it needs `CONFIG_SPI_GPIO`, which the build script's fragment now sets. [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py) produces the same tree from a prebuilt DTB without a kernel tree.
+The fork's device tree sources in `kernel/` build on the base file and are split by what the hardware is:
+
+- [`rk3588s-radxa-cm5-uconsole-mainboard.dtsi`](kernel/rk3588s-radxa-cm5-uconsole-mainboard.dtsi): the mainboard, every uConsole. Backlight on the OCP8178 one-wire driver (32 levels), the amplifier enable held low and the UART4 console disabled. Candidate for the base DTS.
+- [`rk3588s-radxa-cm5-uconsole-hg-fan.dtsi`](kernel/rk3588s-radxa-cm5-uconsole-hg-fan.dtsi): the HackerGadgets adapter's fan header as a `pwm-fan` with a thermal map (PWM11 on GPIO3_D5, tacho on GPIO4_A4; a Raspberry Pi 4/5 fan fits).
+- [`rk3588s-radxa-cm5-uconsole-battery-10ah.dtsi`](kernel/rk3588s-radxa-cm5-uconsole-battery-10ah.dtsi): labels for this fork's 10 Ah cell. Per machine; swap the numbers or leave it out.
+- [`rk3588s-radxa-cm5-uconsole-aio.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio.dts): the three includes plus the AIO v2 itself, UART2 for its GPS and I2C7 with its RTC. Builds alongside the base DTB; `DTBS_ONLY=1` in the build script rebuilds just the device trees.
+- [`rk3588s-radxa-cm5-uconsole-aio-lora.dts`](kernel/rk3588s-radxa-cm5-uconsole-aio-lora.dts): the AIO variant plus a software SPI bus for an AIO whose LoRa MISO has been wired to its TP2 pad ([docs/aio-v2.md](docs/aio-v2.md#the-one-wire-fix)); needs `CONFIG_SPI_GPIO`, which the build script's fragment sets. [`tools/patch-uconsole-dtb.py`](tools/patch-uconsole-dtb.py) produces the same tree from a prebuilt DTB without a kernel tree.
 
 ---
 

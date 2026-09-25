@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Fan header of the HackerGadgets "uConsole CM4/Radxa-CM5 Adapter Board" (rev v1.2).
+ *
+ * The 4-pin header takes a Raspberry Pi 4/5 style PWM fan: 5 V (always on),
+ * GND, tacho, PWM. On the adapter the two signals go to the Radxa module's
+ * third connector (HackerGadgets' schematic, shared by vileer 2026-09-23):
+ *
+ *   FAN_PWM   -> pin 218 = GPIO3_D5, hardware PWM11 in its m3 pinmux
+ *   FAN_TACHO -> pin 238 = GPIO4_A4, open-drain from the fan, needs a pull-up
+ *
+ * Both measured on 2026-09-25 with a Raspberry Pi PWM fan: the fan follows
+ * GPIO3_D5, and GPIO4_A4 with a pull-up shows two pulses per revolution
+ * (~8700 rpm at full speed). A Pi fan runs at full speed when the PWM line
+ * is left floating, which is what happens without this file.
+ *
+ * The header is adapter hardware, not AIO hardware, so this lives in its own
+ * include: rk3588s-radxa-cm5-uconsole-aio.dts pulls it in (and with it the
+ * aio-lora variant); the plain base DTS can include it the same way.
+ *
+ * 25 kHz PWM (the Pi fan spec), higher duty = faster. The cooling levels and
+ * trips mirror what mainline does for the Rock 5B's fan on the same SoC:
+ * off below 50 degC package temperature, then three steps.
+ *
+ * The SoC's temperature sensor (tsadc) is disabled in Radxa's CM5 include and
+ * the upstream uConsole DTS leaves it that way, so without the line below
+ * there are NO thermal zones at all: no fan control, and also none of the
+ * CPU throttling / critical trips the rk3588 tree defines. Found 2026-09-25
+ * when the fan stayed at full speed. Needs CONFIG_ROCKCHIP_THERMAL (=y in
+ * the build script's fragment; as a module it must be loaded before the
+ * zones can appear).
+ */
+
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/thermal/thermal.h>
+
+/ {
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		pinctrl-names = "default";
+		pinctrl-0 = <&fan_tacho_pin>;
+		pwms = <&pwm11 0 40000 0>;
+		cooling-levels = <0 80 128 192 255>;
+		interrupt-parent = <&gpio4>;
+		interrupts = <RK_PA4 IRQ_TYPE_EDGE_FALLING>;
+		pulses-per-revolution = <2>;
+		#cooling-cells = <2>;
+	};
+};
+
+&pwm11 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm11m3_pins>;
+	status = "okay";
+};
+
+&tsadc {
+	status = "okay";
+};
+
+&pinctrl {
+	fan {
+		fan_tacho_pin: fan-tacho-pin {
+			rockchip,pins = <4 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};
+
+&package_thermal {
+	polling-delay = <1000>;
+
+	trips {
+		package_fan0: package-fan0 {
+			temperature = <50000>;
+			hysteresis = <3000>;
+			type = "active";
+		};
+
+		package_fan1: package-fan1 {
+			temperature = <60000>;
+			hysteresis = <3000>;
+			type = "active";
+		};
+
+		package_fan2: package-fan2 {
+			temperature = <70000>;
+			hysteresis = <3000>;
+			type = "active";
+		};
+	};
+
+	cooling-maps {
+		map_fan0 {
+			trip = <&package_fan0>;
+			cooling-device = <&fan THERMAL_NO_LIMIT 1>;
+		};
+
+		map_fan1 {
+			trip = <&package_fan1>;
+			cooling-device = <&fan 2 2>;
+		};
+
+		map_fan2 {
+			trip = <&package_fan2>;
+			cooling-device = <&fan 3 THERMAL_NO_LIMIT>;
+		};
+	};
+};
