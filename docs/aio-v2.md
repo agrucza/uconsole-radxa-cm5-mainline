@@ -139,9 +139,9 @@ The SX1262 hears the SoC and cannot answer. Three of its four SPI lines arrive a
 
 | Stage | MISO is on | Source |
 |---|---|---|
-| AIO v2 | HT-RA62 pad 13 → edge finger 20, labelled `SPI1_MISO` | HackerGadgets' AIO drawing; measured 2026-09-22, pad 13 to finger 20 and nothing else |
+| AIO v2 | HT-RA62 pad 13 → edge finger 20, labelled `SPI1_MISO` | [HackerGadgets' AIO drawing](schematics/hackergadgets-aio-v2-mpcie-connector.png); measured 2026-09-22, pad 13 to finger 20 and nothing else |
 | uConsole mainboard | finger 20 = net `GPIO29`, SO-DIMM pin 30 | ClockworkPi's mainboard schematic |
-| HackerGadgets adapter | `DDR_GPIO29` → Connector 1 position 26 (the Pi's GPIO19 position) | HackerGadgets' adapter drawing; measured 2026-09-20, mPCIe 20 to position 26 |
+| HackerGadgets adapter | `DDR_GPIO29` → Connector 1 position 26 (the Pi's GPIO19 position) | [HackerGadgets' adapter drawing](schematics/hackergadgets-cm4-radxa-cm5-adapter-v1.2.jpg); measured 2026-09-20, mPCIe 20 to position 26 |
 | Radxa CM5 | position 26: **NC** | Radxa's pinout spreadsheet and their `gpio-line-names`; a scan of every free SoC GPIO while clocking the chip found no line following it ([`tools/lora-miso-scan.py`](../tools/lora-miso-scan.py), 2026-09-20) |
 
 The other six module lines land exactly where the drawing says: MOSI 22, SCK 24, NSS 18, BUSY 30, DIO1 34, RST 32, all measured on the AIO on 2026-09-22.
@@ -224,7 +224,7 @@ The AIO v2 is not the only thing that goes into the mPCIe slot, and the slot's l
 - **SPI4 stays disabled in the AIO DTS.** On the 4G board the lines the AIO uses for LoRa SPI are the modem's PCM audio interface, and the modem drives the PCM clock and data-out itself. An enabled SPI4 would hold its clock and chip select against those outputs. Since LoRa has no path on the CM5 anyway, the AIO DTS does not enable SPI4, and [`tools/patch-uconsole-dtb.py`](../tools/patch-uconsole-dtb.py) disables it again in a DTB patched by an older version.
 - **`aio-rails.service` runs only with the AIO present.** `aio usb on` drives the line that, on the 4G board, is the modem's STATUS output. The unit therefore carries `ConditionPathExists=/sys/bus/i2c/devices/7-0051`: the AIO's RTC on I2C7 is the one thing in that slot no other board has. With any other board the unit is skipped. The gpsd drop-in only acts when gpsd runs, which nobody enables without the AIO.
 
-What is known about the boards in this collection, from the makers' pages and schematics (HackerGadgets' schematics of the AIO v2 edge connector and of the CM4/Radxa-CM5 adapter (rev v1.2), shared by vileer on the ClockworkPi forum on 2026-09-23; ClockworkPi's 4G board schematic); "expected" means not tried here:
+What is known about the boards in this collection, from the makers' pages and schematics (HackerGadgets' drawings in [`docs/schematics/`](schematics/README.md), shared by vileer on the ClockworkPi forum on 2026-09-23; ClockworkPi's 4G board schematic); "expected" means not tried here:
 
 | Board | Slot lines it uses | With the AIO DTS on the CM5 |
 |---|---|---|

@@ -317,7 +317,7 @@ runtime/   system files: display kick, shutdown hook, watchdog, labwc autostart,
   battery/ AXP228 settings unit, low-battery guard + timer, minute-by-minute battery log + timer
   debian/  apt hook that restores the mainline boot entry
 tools/     patch-uconsole-dtb.py (AIO nodes into a built DTB), sx1262-bitbang.py and lora-miso-scan.py (LoRa MISO probes)
-docs/      gpio-map, troubleshooting, aio-v2, battery, debian, kernel-guide
+docs/      gpio-map, troubleshooting, aio-v2, battery, debian, kernel-guide; schematics/ (HackerGadgets' AIO v2 and adapter drawings, with permission)
 ```
 
 ---
